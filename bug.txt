@@ -1,0 +1,18 @@
+1. disconnected (1006): no reason in control ui
+solution: 
+add below into openclaw.json 
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 18789,
+    "controlUi": {
+      "enabled": true,
+      "allowInsecureAuth": true
+    },
+    "auth": {
+      "mode": "token",
+      "token": "[REDACTED]"
+    }
+  }
+https://github.com/openclaw/openclaw/issues/1679
+
