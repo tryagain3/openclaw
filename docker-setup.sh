@@ -7,6 +7,7 @@ EXTRA_COMPOSE_FILE="$ROOT_DIR/docker-compose.extra.yml"
 IMAGE_NAME="${OPENCLAW_IMAGE:-openclaw:local}"
 EXTRA_MOUNTS="${OPENCLAW_EXTRA_MOUNTS:-}"
 HOME_VOLUME_NAME="${OPENCLAW_HOME_VOLUME:-}"
+NAS_DOCKER_ROOT_DIR="/volume1/docker/openclaw"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -20,6 +21,9 @@ if ! docker compose version >/dev/null 2>&1; then
   echo "Docker Compose not available (try: docker compose version)" >&2
   exit 1
 fi
+
+export OPENCLAW_CONFIG_DIR="${NAS_DOCKER_ROOT_DIR}/.openclaw"
+export OPENCLAW_WORKSPACE_DIR="${NAS_DOCKER_ROOT_DIR}/.openclaw/workspace"
 
 OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
 OPENCLAW_WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-$HOME/.openclaw/workspace}"
