@@ -33,32 +33,114 @@ export function stripEnvelope(text: string): string {
   return text.slice(match[0].length);
 }
 
+// Track how many times we've logged to avoid spam
+let extractTextDebugCount = 0;
+const MAX_EXTRACT_DEBUG_LOGS = 5;
+
 export function extractText(message: unknown): string | null {
   const m = message as Record<string, unknown>;
   const role = typeof m.role === "string" ? m.role : "";
   const content = m.content;
+  
+  // Debug: log extraction attempts for first few messages
+  const shouldDebug = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
+  
   if (typeof content === "string") {
     const processed = role === "assistant" ? stripThinkingTags(content) : stripEnvelope(content);
-    return processed;
+    if (shouldDebug) {
+      extractTextDebugCount++;
+      console.log(`[extractText] String content (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
+        role,
+        contentLength: content.length,
+        processedLength: processed?.length ?? 0,
+        wasEmpty: !processed,
+      });
+    }
+    return processed || null;
   }
+  
   if (Array.isArray(content)) {
     const parts = content
       .map((p) => {
         const item = p as Record<string, unknown>;
-        if (item.type === "text" && typeof item.text === "string") return item.text;
+        // Handle standard format: { type: "text", text: "..." }
+        if (item.type === "text" && typeof item.text === "string") {
+          return item.text;
+        }
+        // Handle case where item itself might be a string
+        if (typeof item === "string") {
+          return item;
+        }
+        // Handle case where content is directly a string in array
+        if (typeof p === "string") {
+          return p;
+        }
+        // Handle OpenAI format: { type: "text", content: "..." }
+        if (item.type === "text" && typeof item.content === "string") {
+          return item.content;
+        }
         return null;
       })
-      .filter((v): v is string => typeof v === "string");
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    
+    if (shouldDebug && parts.length === 0) {
+      extractTextDebugCount++;
+      console.groupCollapsed(`%c[extractText] Array content empty (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #FF9800; font-weight: bold");
+      console.log("Role:", role);
+      console.log("Content array:", content);
+      console.log("Content items:", content.map((item: unknown, i: number) => {
+        const it = item as Record<string, unknown>;
+        return {
+          index: i,
+          type: it.type,
+          keys: Object.keys(it),
+          text: it.text,
+          content: it.content,
+        };
+      }));
+      console.groupEnd();
+    }
+    
     if (parts.length > 0) {
       const joined = parts.join("\n");
       const processed = role === "assistant" ? stripThinkingTags(joined) : stripEnvelope(joined);
-      return processed;
+      if (shouldDebug && !processed) {
+        extractTextDebugCount++;
+        console.log(`[extractText] Array content was empty after processing (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, { role, parts, joined });
+      }
+      return processed || null;
     }
   }
+  
   if (typeof m.text === "string") {
     const processed = role === "assistant" ? stripThinkingTags(m.text) : stripEnvelope(m.text);
-    return processed;
+    if (shouldDebug) {
+      extractTextDebugCount++;
+      console.log(`[extractText] Text property (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
+        role,
+        textLength: m.text.length,
+        processedLength: processed?.length ?? 0,
+      });
+    }
+    return processed || null;
   }
+  
+  if (shouldDebug) {
+    extractTextDebugCount++;
+    console.groupCollapsed(`%c[extractText] No text found (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #F44336; font-weight: bold");
+    console.log("Message structure:", {
+      role,
+      hasContent: !!content,
+      contentType: typeof content,
+      contentIsArray: Array.isArray(content),
+      contentLength: Array.isArray(content) ? content.length : "N/A",
+      hasText: !!m.text,
+      textType: typeof m.text,
+    });
+    console.log("Full message:", JSON.parse(JSON.stringify(message)));
+    console.groupEnd();
+  }
+  
   return null;
 }
 

@@ -5,12 +5,12 @@ import type { AssistantIdentity } from "../assistant-identity";
 import { toSanitizedMarkdownHtml } from "../markdown";
 import type { MessageGroup } from "../types/chat-types";
 import { renderCopyAsMarkdownButton } from "./copy-as-markdown";
-import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer";
 import {
   extractTextCached,
   extractThinkingCached,
   formatReasoningMarkdown,
 } from "./message-extract";
+import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer";
 import { extractToolCards, renderToolCardSidebar } from "./tool-cards";
 
 type ImageBlock = {
@@ -255,6 +255,43 @@ function renderGroupedMessage(
   const markdown = markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
 
+  // Debug: log when message has no content - but only log first few to avoid spam
+  if (!markdown && !hasToolCards && !hasImages) {
+    const shouldLog = Math.random() < 0.1; // Log ~10% of empty messages to avoid spam
+    if (shouldLog) {
+      console.groupCollapsed(`%c[RENDER] Empty message detected (sample)`, "color: #FF5722; font-weight: bold");
+      console.log("Message structure:", {
+        role,
+        hasContent: !!m.content,
+        contentType: typeof m.content,
+        contentIsArray: Array.isArray(m.content),
+        contentLength: Array.isArray(m.content) ? m.content.length : "N/A",
+        hasText: !!m.text,
+        textType: typeof m.text,
+        extractedText,
+        extractedTextLength: extractedText?.length ?? 0,
+        hasToolCards,
+        hasImages,
+        isToolResult,
+      });
+      console.log("Full message object:", JSON.parse(JSON.stringify(message)));
+      if (Array.isArray(m.content)) {
+        console.log("Content array items:", m.content.map((item, i) => ({
+          index: i,
+          type: typeof item === "object" && item !== null ? (item as Record<string, unknown>).type : typeof item,
+          keys: typeof item === "object" && item !== null ? Object.keys(item as Record<string, unknown>) : [],
+        })));
+        console.log("Full content array:", m.content);
+      } else if (typeof m.content === "string") {
+        console.log("Content string (first 500 chars):", m.content.substring(0, 500));
+      } else {
+        console.log("Raw content:", m.content);
+      }
+      console.groupEnd();
+    }
+    return nothing;
+  }
+
   const bubbleClasses = [
     "chat-bubble",
     canCopyMarkdown ? "has-copy" : "",
@@ -269,8 +306,6 @@ function renderGroupedMessage(
       renderToolCardSidebar(card, onOpenSidebar),
     )}`;
   }
-
-  if (!markdown && !hasToolCards && !hasImages) return nothing;
 
   return html`
     <div class="${bubbleClasses}">

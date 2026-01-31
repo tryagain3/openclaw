@@ -1,21 +1,21 @@
 import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
-import type { SessionsListResult } from "../types";
-import type { ChatAttachment, ChatQueueItem } from "../ui-types";
-import type { ChatItem, MessageGroup } from "../types/chat-types";
-import { icons } from "../icons";
-import {
-  normalizeMessage,
-  normalizeRoleForGrouping,
-} from "../chat/message-normalizer";
 import {
   renderMessageGroup,
   renderReadingIndicatorGroup,
   renderStreamingGroup,
 } from "../chat/grouped-render";
-import { renderMarkdownSidebar } from "./markdown-sidebar";
+import {
+  normalizeMessage,
+  normalizeRoleForGrouping,
+} from "../chat/message-normalizer";
 import "../components/resizable-divider";
+import { icons } from "../icons";
+import type { SessionsListResult } from "../types";
+import type { ChatItem, MessageGroup } from "../types/chat-types";
+import type { ChatAttachment, ChatQueueItem } from "../ui-types";
+import { renderMarkdownSidebar } from "./markdown-sidebar";
 
 export type CompactionIndicatorStatus = {
   active: boolean;
@@ -470,6 +470,28 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
 
     if (!props.showThinking && normalized.role.toLowerCase() === "toolresult") {
       continue;
+    }
+
+    // Debug: log first few messages to understand structure
+    if (i < historyStart + 3) {
+      console.groupCollapsed(`%c[BUILD] Sample message ${i}`, "color: #607D8B; font-weight: bold");
+      console.log("Raw message:", JSON.parse(JSON.stringify(msg)));
+      console.log("Normalized:", normalized);
+      const m = msg as Record<string, unknown>;
+      console.log("Content structure:", {
+        hasContent: !!m.content,
+        contentType: typeof m.content,
+        contentIsArray: Array.isArray(m.content),
+        contentValue: Array.isArray(m.content) 
+          ? m.content.map((item: unknown, idx: number) => ({
+              index: idx,
+              type: typeof item,
+              isObject: typeof item === "object" && item !== null,
+              keys: typeof item === "object" && item !== null ? Object.keys(item as Record<string, unknown>) : [],
+            }))
+          : m.content,
+      });
+      console.groupEnd();
     }
 
     items.push({
