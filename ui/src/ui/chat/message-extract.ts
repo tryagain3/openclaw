@@ -35,7 +35,7 @@ export function stripEnvelope(text: string): string {
 
 // Track how many times we've logged to avoid spam
 let extractTextDebugCount = 0;
-const MAX_EXTRACT_DEBUG_LOGS = 10; // Increased to see more examples
+const MAX_EXTRACT_DEBUG_LOGS = 20; // Increased to see more examples
 
 export function extractText(message: unknown): string | null {
   const m = message as Record<string, unknown>;
@@ -43,7 +43,9 @@ export function extractText(message: unknown): string | null {
   const content = m.content;
   
   // Debug: log extraction attempts for first few messages
+  // Also log if we get null/empty result (to catch issues)
   const shouldDebug = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
+  const shouldLogEmpty = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
   
   if (typeof content === "string") {
     const beforeProcessing = content;
@@ -168,9 +170,9 @@ export function extractText(message: unknown): string | null {
     return processed || null;
   }
   
-  if (shouldDebug) {
+  if (shouldLogEmpty) {
     extractTextDebugCount++;
-    console.groupCollapsed(`%c[extractText] No text found (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #F44336; font-weight: bold");
+    console.group(`%c[extractText] No text found (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #F44336; font-weight: bold");
     console.log("Message structure:", {
       role,
       hasContent: !!content,
@@ -181,6 +183,20 @@ export function extractText(message: unknown): string | null {
       textType: typeof m.text,
     });
     console.log("Full message:", JSON.parse(JSON.stringify(message)));
+    if (Array.isArray(content)) {
+      console.log("Content array detail:", content.map((item: unknown, i: number) => {
+        const it = item as Record<string, unknown>;
+        return {
+          index: i,
+          type: it.type,
+          keys: Object.keys(it),
+          text: it.text,
+          textType: typeof it.text,
+          textLength: typeof it.text === "string" ? it.text.length : 0,
+          textPreview: typeof it.text === "string" ? it.text.substring(0, 100) : undefined,
+        };
+      }));
+    }
     console.groupEnd();
   }
   
