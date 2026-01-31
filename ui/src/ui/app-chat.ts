@@ -168,11 +168,19 @@ export async function handleSendChat(
 }
 
 export async function refreshChat(host: ChatHost) {
+  const timestamp = new Date().toISOString();
+  console.group(`%c[CHAT] refreshChat ${timestamp}`, "color: #4CAF50; font-weight: bold");
+  console.log("Host state:", {
+    connected: host.connected,
+    sessionKey: host.sessionKey,
+  });
   await Promise.all([
     loadChatHistory(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp, { activeMinutes: 0 }),
     refreshChatAvatar(host),
   ]);
+  console.log("✅ refreshChat completed");
+  console.groupEnd();
   scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0], true);
 }
 

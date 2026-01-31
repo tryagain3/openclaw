@@ -139,6 +139,10 @@ export function connectGateway(host: GatewayHost) {
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
+      const timestamp = new Date().toISOString();
+      console.group(`%c[GATEWAY] onHello ${timestamp}`, "color: #9C27B0; font-weight: bold");
+      console.log("Refreshing active tab:", { tab: host.tab });
+      console.groupEnd();
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason }) => {

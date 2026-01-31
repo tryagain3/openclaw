@@ -156,11 +156,19 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadExecApprovals(host as unknown as OpenClawApp);
   }
   if (host.tab === "chat") {
+    const timestamp = new Date().toISOString();
+    console.group(`%c[TAB] refreshActiveTab: chat ${timestamp}`, "color: #FF9800; font-weight: bold");
+    console.log("Tab state:", {
+      connected: host.connected,
+      sessionKey: host.sessionKey,
+      chatHasAutoScrolled: host.chatHasAutoScrolled,
+    });
     await refreshChat(host as unknown as Parameters<typeof refreshChat>[0]);
     scheduleChatScroll(
       host as unknown as Parameters<typeof scheduleChatScroll>[0],
       !host.chatHasAutoScrolled,
     );
+    console.groupEnd();
   }
   if (host.tab === "config") {
     await loadConfigSchema(host as unknown as OpenClawApp);

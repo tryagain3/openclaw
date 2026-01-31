@@ -427,7 +427,22 @@ export function renderApp(state: AppViewState) {
           : nothing}
 
         ${state.tab === "chat"
-          ? renderChat({
+          ? (() => {
+              const timestamp = new Date().toISOString();
+              console.group(`%c[RENDER] renderChat ${timestamp}`, "color: #F44336; font-weight: bold");
+              const messageCount = Array.isArray(state.chatMessages) ? state.chatMessages.length : 0;
+              console.log("Render state:", {
+                connected: state.connected,
+                sessionKey: state.sessionKey,
+                loading: state.chatLoading,
+                messageCount,
+                toolMessageCount: Array.isArray(state.chatToolMessages) ? state.chatToolMessages.length : 0,
+                hasStream: !!state.chatStream,
+                hasError: !!state.lastError,
+                error: state.lastError,
+              });
+              console.groupEnd();
+              return renderChat({
               sessionKey: state.sessionKey,
               onSessionKeyChange: (next) => {
                 state.sessionKey = next;
@@ -497,7 +512,8 @@ export function renderApp(state: AppViewState) {
               onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
               assistantName: state.assistantName,
               assistantAvatar: state.assistantAvatar,
-            })
+            });
+            })()
           : nothing}
 
         ${state.tab === "config"

@@ -181,6 +181,29 @@ function renderAttachmentPreview(props: ChatProps) {
 }
 
 export function renderChat(props: ChatProps) {
+  const timestamp = new Date().toISOString();
+  const messageCount = Array.isArray(props.messages) ? props.messages.length : 0;
+  const toolMessageCount = Array.isArray(props.toolMessages) ? props.toolMessages.length : 0;
+  
+  console.group(`%c[VIEW] renderChat ${timestamp}`, "color: #00BCD4; font-weight: bold");
+  console.log("Props:", {
+    connected: props.connected,
+    loading: props.loading,
+    sessionKey: props.sessionKey,
+    messageCount,
+    toolMessageCount,
+    hasStream: !!props.stream,
+    streamLength: props.stream?.length ?? 0,
+    disabledReason: props.disabledReason,
+    error: props.error,
+  });
+  if (props.error) {
+    console.error("❌ Chat error:", props.error);
+  }
+  if (props.disabledReason) {
+    console.warn("⚠️ Chat disabled:", props.disabledReason);
+  }
+  console.groupEnd();
   const canCompose = props.connected;
   const isBusy = props.sending || props.stream !== null;
   const canAbort = Boolean(props.canAbort && props.onAbort);
@@ -203,6 +226,8 @@ export function renderChat(props: ChatProps) {
 
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
+  const chatItems = buildChatItems(props);
+  console.log("[chat] built chat items", { itemCount: chatItems.length });
   const thread = html`
     <div
       class="chat-thread"
@@ -211,7 +236,7 @@ export function renderChat(props: ChatProps) {
       @scroll=${props.onChatScroll}
     >
       ${props.loading ? html`<div class="muted">Loading chat…</div>` : nothing}
-      ${repeat(buildChatItems(props), (item) => item.key, (item) => {
+      ${repeat(chatItems, (item) => item.key, (item) => {
         if (item.kind === "reading-indicator") {
           return renderReadingIndicatorGroup(assistantIdentity);
         }
@@ -418,6 +443,15 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
   const history = Array.isArray(props.messages) ? props.messages : [];
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
+  
+  console.groupCollapsed(`%c[BUILD] buildChatItems`, "color: #795548; font-weight: bold");
+  console.log("Input:", {
+    historyLength: history.length,
+    toolsLength: tools.length,
+    hasStream: props.stream !== null,
+    streamLength: props.stream?.length ?? 0,
+    showThinking: props.showThinking,
+  });
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
   if (historyStart > 0) {
     items.push({
@@ -468,7 +502,19 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     }
   }
 
-  return groupMessages(items);
+  const grouped = groupMessages(items);
+  console.log("Output:", {
+    rawItemsCount: items.length,
+    groupedItemsCount: grouped.length,
+  });
+  if (grouped.length > 0) {
+    console.log("First few items:", grouped.slice(0, 3).map((item) => ({
+      kind: item.kind,
+      key: item.key,
+    })));
+  }
+  console.groupEnd();
+  return grouped;
 }
 
 function messageKey(message: unknown, index: number): string {

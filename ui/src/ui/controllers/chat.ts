@@ -1,7 +1,7 @@
 import { extractText } from "../chat/message-extract";
 import type { GatewayBrowserClient } from "../gateway";
-import { generateUUID } from "../uuid";
 import type { ChatAttachment } from "../ui-types";
+import { generateUUID } from "../uuid";
 
 export type ChatState = {
   client: GatewayBrowserClient | null;
@@ -28,20 +28,68 @@ export type ChatEventPayload = {
 };
 
 export async function loadChatHistory(state: ChatState) {
-  if (!state.client || !state.connected) return;
+  const timestamp = new Date().toISOString();
+  console.group(`%c[CHAT] loadChatHistory ${timestamp}`, "color: #2196F3; font-weight: bold");
+  console.log("State:", {
+    hasClient: !!state.client,
+    connected: state.connected,
+    sessionKey: state.sessionKey,
+  });
+  
+  if (!state.client || !state.connected) {
+    console.warn("⚠️ Skipped: no client or not connected");
+    console.groupEnd();
+    return;
+  }
+  
   state.chatLoading = true;
   state.lastError = null;
   try {
+    console.log("📤 Requesting chat.history...", { sessionKey: state.sessionKey });
     const res = (await state.client.request("chat.history", {
       sessionKey: state.sessionKey,
       limit: 200,
     })) as { messages?: unknown[]; thinkingLevel?: string | null };
+    
+    const messageCount = Array.isArray(res.messages) ? res.messages.length : 0;
+    console.log(`✅ chat.history response: ${messageCount} messages`, {
+      messageCount,
+      thinkingLevel: res.thinkingLevel,
+    });
+    
+    if (messageCount > 0 && Array.isArray(res.messages)) {
+      try {
+        const preview = res.messages.slice(0, 5).map((msg: unknown, i: number) => {
+          const m = msg as Record<string, unknown>;
+          return {
+            index: i,
+            role: m.role ?? "unknown",
+            hasContent: !!m.content,
+            timestamp: m.timestamp ?? "none",
+          };
+        });
+        console.table(preview);
+        if (messageCount > 5) {
+          console.log(`... and ${messageCount - 5} more messages`);
+        }
+      } catch (tableErr) {
+        console.log("Message preview (table failed):", res.messages.slice(0, 3));
+      }
+    }
+    
     state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
+    console.error("❌ loadChatHistory error:", err);
+    console.error("Error details:", {
+      name: err instanceof Error ? err.name : "Unknown",
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     state.lastError = String(err);
   } finally {
     state.chatLoading = false;
+    console.groupEnd();
   }
 }
 
