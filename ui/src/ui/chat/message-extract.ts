@@ -46,15 +46,27 @@ export function extractText(message: unknown): string | null {
   const shouldDebug = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
   
   if (typeof content === "string") {
+    const beforeProcessing = content;
     const processed = role === "assistant" ? stripThinkingTags(content) : stripEnvelope(content);
     if (shouldDebug) {
       extractTextDebugCount++;
-      console.log(`[extractText] String content (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
+      console.group(`%c[extractText] String content (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #2196F3; font-weight: bold");
+      console.log("Before processing:", {
         role,
         contentLength: content.length,
-        processedLength: processed?.length ?? 0,
-        wasEmpty: !processed,
+        contentPreview: content.substring(0, 200),
       });
+      console.log("After processing:", {
+        processedLength: processed?.length ?? 0,
+        processedPreview: processed?.substring(0, 200),
+        wasEmpty: !processed,
+        wasRemoved: beforeProcessing.length > 0 && (!processed || processed.length === 0),
+      });
+      if (beforeProcessing.length > 0 && (!processed || processed.length === 0)) {
+        console.warn("⚠️ Content was removed by processing!");
+        console.log("Full original content:", beforeProcessing);
+      }
+      console.groupEnd();
     }
     return processed || null;
   }
@@ -116,10 +128,28 @@ export function extractText(message: unknown): string | null {
     
     if (parts.length > 0) {
       const joined = parts.join("\n");
+      const beforeProcessing = joined;
       const processed = role === "assistant" ? stripThinkingTags(joined) : stripEnvelope(joined);
-      if (shouldDebug && !processed) {
+      if (shouldDebug) {
         extractTextDebugCount++;
-        console.log(`[extractText] Array content was empty after processing (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, { role, parts, joined });
+        console.group(`%c[extractText] Array content extracted (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #4CAF50; font-weight: bold");
+        console.log("Before processing:", {
+          role,
+          partsCount: parts.length,
+          joinedLength: joined.length,
+          joinedPreview: joined.substring(0, 200),
+        });
+        console.log("After processing:", {
+          processedLength: processed?.length ?? 0,
+          processedPreview: processed?.substring(0, 200),
+          wasEmpty: !processed,
+          wasRemoved: beforeProcessing.length > 0 && (!processed || processed.length === 0),
+        });
+        if (beforeProcessing.length > 0 && (!processed || processed.length === 0)) {
+          console.warn("⚠️ Content was removed by processing!");
+          console.log("Full original joined content:", beforeProcessing);
+        }
+        console.groupEnd();
       }
       return processed || null;
     }

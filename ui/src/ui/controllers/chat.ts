@@ -61,14 +61,54 @@ export async function loadChatHistory(state: ChatState) {
       try {
         const preview = res.messages.slice(0, 5).map((msg: unknown, i: number) => {
           const m = msg as Record<string, unknown>;
+          const content = m.content;
+          let contentType = "none";
+          let contentLength = 0;
+          if (typeof content === "string") {
+            contentType = "string";
+            contentLength = content.length;
+          } else if (Array.isArray(content)) {
+            contentType = "array";
+            contentLength = content.length;
+          }
           return {
             index: i,
             role: m.role ?? "unknown",
             hasContent: !!m.content,
+            contentType,
+            contentLength,
             timestamp: m.timestamp ?? "none",
           };
         });
         console.table(preview);
+        
+        // Log detailed content structure for first 3 messages
+        console.group("📋 First 3 messages content structure");
+        for (let i = 0; i < Math.min(3, res.messages.length); i++) {
+          const msg = res.messages[i] as Record<string, unknown>;
+          console.log(`Message ${i} (role: ${msg.role}):`, {
+            content: msg.content,
+            contentType: typeof msg.content,
+            contentIsArray: Array.isArray(msg.content),
+            contentArrayLength: Array.isArray(msg.content) ? msg.content.length : "N/A",
+            contentArrayItems: Array.isArray(msg.content) 
+              ? msg.content.map((item: unknown, idx: number) => {
+                  const it = item as Record<string, unknown>;
+                  return {
+                    index: idx,
+                    type: it.type,
+                    keys: Object.keys(it),
+                    text: it.text,
+                    textType: typeof it.text,
+                    textLength: typeof it.text === "string" ? it.text.length : 0,
+                    textPreview: typeof it.text === "string" ? it.text.substring(0, 50) : undefined,
+                  };
+                })
+              : "N/A",
+          });
+        }
+        console.groupEnd();
+        
         if (messageCount > 5) {
           console.log(`... and ${messageCount - 5} more messages`);
         }
