@@ -45,16 +45,111 @@ export async function loadChatHistory(state: ChatState) {
   state.chatLoading = true;
   state.lastError = null;
   try {
-    console.log("📤 Requesting chat.history...", { sessionKey: state.sessionKey });
-    const res = (await state.client.request("chat.history", {
+    const requestParams = {
       sessionKey: state.sessionKey,
       limit: 200,
-    })) as { messages?: unknown[]; thinkingLevel?: string | null };
+    };
+    
+    console.group(`%c[API] chat.history request`, "color: #2196F3; font-weight: bold");
+    console.log("Request params:", requestParams);
+    console.log("Client state:", {
+      hasClient: !!state.client,
+      connected: state.connected,
+      clientConnected: state.client?.connected ?? false,
+    });
+    
+    const requestStartTime = Date.now();
+    let res: { messages?: unknown[]; thinkingLevel?: string | null };
+    let requestError: unknown = null;
+    
+    try {
+      res = (await state.client.request("chat.history", requestParams)) as {
+        messages?: unknown[];
+        thinkingLevel?: string | null;
+      };
+      const requestDuration = Date.now() - requestStartTime;
+      console.log(`✅ Request succeeded (${requestDuration}ms)`);
+    } catch (err) {
+      requestError = err;
+      const requestDuration = Date.now() - requestStartTime;
+      console.error(`❌ Request failed after ${requestDuration}ms:`, err);
+      console.error("Error details:", {
+        name: err instanceof Error ? err.name : "Unknown",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+        errorType: typeof err,
+        errorString: String(err),
+      });
+      throw err;
+    }
+    
+    const requestDuration = Date.now() - requestStartTime;
+    
+    console.group(`%c[API] chat.history response`, "color: #4CAF50; font-weight: bold");
+    console.log("Response received:", {
+      duration: `${requestDuration}ms`,
+      responseType: typeof res,
+      responseIsObject: res !== null && typeof res === "object",
+      responseKeys: res !== null && typeof res === "object" ? Object.keys(res) : [],
+      responseStringified: JSON.stringify(res).substring(0, 500),
+    });
+    
+    // Validate response structure
+    if (!res || typeof res !== "object") {
+      console.error("❌ Invalid response: not an object", {
+        res,
+        resType: typeof res,
+        resIsNull: res === null,
+        resIsUndefined: res === undefined,
+      });
+      throw new Error(`Invalid response from chat.history: expected object, got ${typeof res}`);
+    }
     
     const messageCount = Array.isArray(res.messages) ? res.messages.length : 0;
+    const hasMessages = "messages" in res;
+    const messagesIsArray = Array.isArray(res.messages);
+    const thinkingLevel = res.thinkingLevel;
+    
+    console.log("Response structure:", {
+      hasMessages,
+      messagesIsArray,
+      messageCount,
+      thinkingLevel,
+      thinkingLevelType: typeof thinkingLevel,
+      allResponseKeys: Object.keys(res),
+    });
+    
+    // Check for empty or problematic responses
+    if (!hasMessages) {
+      console.warn("⚠️ Response missing 'messages' property");
+    } else if (!messagesIsArray) {
+      console.error("❌ Response 'messages' is not an array", {
+        messagesType: typeof res.messages,
+        messagesValue: res.messages,
+      });
+    } else if (messageCount === 0) {
+      console.warn("⚠️ Response has empty messages array");
+      console.log("Full response:", JSON.parse(JSON.stringify(res)));
+    }
+    
+    // Check for empty content arrays in messages
+    if (messageCount > 0 && Array.isArray(res.messages)) {
+      const emptyContentCount = res.messages.filter((msg: unknown) => {
+        const m = msg as Record<string, unknown>;
+        return Array.isArray(m.content) && m.content.length === 0;
+      }).length;
+      if (emptyContentCount > 0) {
+        console.warn(`⚠️ Found ${emptyContentCount}/${messageCount} messages with empty content arrays`);
+      }
+    }
+    
+    console.groupEnd();
+    console.groupEnd();
+    
     console.log(`✅ chat.history response: ${messageCount} messages`, {
       messageCount,
       thinkingLevel: res.thinkingLevel,
+      duration: `${requestDuration}ms`,
     });
     
     if (messageCount > 0 && Array.isArray(res.messages)) {
