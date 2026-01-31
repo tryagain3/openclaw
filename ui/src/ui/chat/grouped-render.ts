@@ -255,11 +255,15 @@ function renderGroupedMessage(
   const markdown = markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
 
-  // Debug: log when message has no content - but only log first few to avoid spam
+  // Debug: log when message has no content - always log first 3 to understand the issue
   if (!markdown && !hasToolCards && !hasImages) {
-    const shouldLog = Math.random() < 0.1; // Log ~10% of empty messages to avoid spam
-    if (shouldLog) {
-      console.groupCollapsed(`%c[RENDER] Empty message detected (sample)`, "color: #FF5722; font-weight: bold");
+    // Track empty message count
+    const win = window as unknown as { __openclawEmptyMessageCount?: number };
+    const emptyCount = win.__openclawEmptyMessageCount ?? 0;
+    win.__openclawEmptyMessageCount = emptyCount + 1;
+    
+    if (emptyCount < 3) {
+      console.group(`%c[RENDER] Empty message detected #${emptyCount + 1}`, "color: #FF5722; font-weight: bold");
       console.log("Message structure:", {
         role,
         hasContent: !!m.content,
@@ -270,20 +274,30 @@ function renderGroupedMessage(
         textType: typeof m.text,
         extractedText,
         extractedTextLength: extractedText?.length ?? 0,
+        extractedTextPreview: extractedText?.substring(0, 100),
         hasToolCards,
         hasImages,
         isToolResult,
       });
       console.log("Full message object:", JSON.parse(JSON.stringify(message)));
       if (Array.isArray(m.content)) {
-        console.log("Content array items:", m.content.map((item, i) => ({
-          index: i,
-          type: typeof item === "object" && item !== null ? (item as Record<string, unknown>).type : typeof item,
-          keys: typeof item === "object" && item !== null ? Object.keys(item as Record<string, unknown>) : [],
-        })));
+        console.log("Content array items:", m.content.map((item: unknown, i: number) => {
+          const it = item as Record<string, unknown>;
+          return {
+            index: i,
+            type: typeof item === "object" && item !== null ? it.type : typeof item,
+            keys: typeof item === "object" && item !== null ? Object.keys(it) : [],
+            text: it.text,
+            content: it.content,
+            hasText: typeof it.text === "string",
+            textLength: typeof it.text === "string" ? it.text.length : 0,
+            textPreview: typeof it.text === "string" ? it.text.substring(0, 50) : undefined,
+          };
+        }));
         console.log("Full content array:", m.content);
       } else if (typeof m.content === "string") {
         console.log("Content string (first 500 chars):", m.content.substring(0, 500));
+        console.log("Content string length:", m.content.length);
       } else {
         console.log("Raw content:", m.content);
       }

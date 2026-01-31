@@ -35,7 +35,7 @@ export function stripEnvelope(text: string): string {
 
 // Track how many times we've logged to avoid spam
 let extractTextDebugCount = 0;
-const MAX_EXTRACT_DEBUG_LOGS = 5;
+const MAX_EXTRACT_DEBUG_LOGS = 10; // Increased to see more examples
 
 export function extractText(message: unknown): string | null {
   const m = message as Record<string, unknown>;
@@ -85,7 +85,7 @@ export function extractText(message: unknown): string | null {
     
     if (shouldDebug && parts.length === 0) {
       extractTextDebugCount++;
-      console.groupCollapsed(`%c[extractText] Array content empty (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #FF9800; font-weight: bold");
+      console.group(`%c[extractText] Array content empty (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #FF9800; font-weight: bold");
       console.log("Role:", role);
       console.log("Content array:", content);
       console.log("Content items:", content.map((item: unknown, i: number) => {
@@ -96,9 +96,22 @@ export function extractText(message: unknown): string | null {
           keys: Object.keys(it),
           text: it.text,
           content: it.content,
+          textType: typeof it.text,
+          textLength: typeof it.text === "string" ? it.text.length : 0,
+          textPreview: typeof it.text === "string" ? it.text.substring(0, 50) : undefined,
         };
       }));
+      console.log("Why extraction failed: No items with type='text' and text property found");
       console.groupEnd();
+    }
+    
+    if (shouldDebug && parts.length > 0) {
+      extractTextDebugCount++;
+      console.log(`[extractText] Array content extracted (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
+        role,
+        partsCount: parts.length,
+        joinedLength: parts.join("\n").length,
+      });
     }
     
     if (parts.length > 0) {
