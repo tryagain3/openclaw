@@ -59,7 +59,22 @@ export function stripEnvelopeFromMessage(message: unknown): unknown {
   if (!message || typeof message !== "object") return message;
   const entry = message as Record<string, unknown>;
   const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "";
-  if (role !== "user") return message;
+  
+  // #region agent log - stripEnvelopeFromMessage INPUT
+  if (role === "assistant") {
+    const isEmpty = Array.isArray(entry.content) && entry.content.length === 0;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat-sanitize.ts:61',message:'stripEnvelopeFromMessage INPUT assistant',data:{role,hasContent:!!entry.content,contentType:typeof entry.content,contentIsArray:Array.isArray(entry.content),contentLength:Array.isArray(entry.content)?entry.content.length:'N/A',isEmpty},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STRIP_IN'})}).catch(()=>{});
+  }
+  // #endregion
+  
+  if (role !== "user") {
+    // #region agent log - stripEnvelopeFromMessage OUTPUT (no change for assistant)
+    if (role === "assistant") {
+      fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat-sanitize.ts:69',message:'stripEnvelopeFromMessage OUTPUT assistant (unchanged)',data:{role,changed:false,hasContent:!!entry.content,contentType:typeof entry.content,contentIsArray:Array.isArray(entry.content),contentLength:Array.isArray(entry.content)?entry.content.length:'N/A'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STRIP_OUT'})}).catch(()=>{});
+    }
+    // #endregion
+    return message;
+  }
 
   let changed = false;
   const next: Record<string, unknown> = { ...entry };

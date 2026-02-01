@@ -130,6 +130,10 @@ function appendAssistantTranscriptMessage(params: {
     message: messageBody,
   };
 
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:133',message:'appendAssistantTranscriptMessage writing to file',data:{transcriptPath,messageBody:{role:messageBody.role,contentLength:Array.isArray(messageBody.content)?messageBody.content.length:'N/A',hasContent:!!messageBody.content,contentIsArray:Array.isArray(messageBody.content)}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'WRITE'})}).catch(()=>{});
+  // #endregion
+
   try {
     fs.appendFileSync(transcriptPath, `${JSON.stringify(transcriptEntry)}\n`, "utf-8");
   } catch (err) {
@@ -183,6 +187,10 @@ function broadcastChatError(params: {
 
 export const chatHandlers: GatewayRequestHandlers = {
   "chat.history": async ({ params, respond, context }) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:185',message:'chat.history request received',data:{params:JSON.parse(JSON.stringify(params))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'REQUEST'})}).catch(()=>{});
+    // #endregion
+    
     if (!validateChatHistoryParams(params)) {
       respond(
         false,
@@ -198,15 +206,37 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
+    
+    // #region agent log - STEP 1: loadSessionEntry INPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:209',message:'STEP1 loadSessionEntry INPUT',data:{sessionKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP1_IN'})}).catch(()=>{});
+    // #endregion
+    
     const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
     const sessionId = entry?.sessionId;
+    
+    // #region agent log - STEP 1: loadSessionEntry OUTPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:212',message:'STEP1 loadSessionEntry OUTPUT',data:{sessionId:sessionId??'none',hasStorePath:!!storePath,hasEntry:!!entry,sessionFile:entry?.sessionFile??'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP1_OUT'})}).catch(()=>{});
+    // #endregion
     
     context.logGateway.info(
       `[CHAT.HISTORY] Loading: sessionKey=${sessionKey} sessionId=${sessionId ?? "none"} storePath=${storePath ?? "none"} sessionFile=${entry?.sessionFile ?? "none"}`,
     );
     
+    // #region agent log - STEP 2: readSessionMessages INPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:217',message:'STEP2 readSessionMessages INPUT',data:{sessionId:sessionId??'none',hasStorePath:!!storePath,sessionFile:entry?.sessionFile??'none',willCall:!!(sessionId&&storePath)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP2_IN'})}).catch(()=>{});
+    // #endregion
+    
     const rawMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
+    
+    // #region agent log - STEP 2: readSessionMessages OUTPUT
+    const rawEmptyCount = rawMessages.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:220',message:'STEP2 readSessionMessages OUTPUT',data:{count:rawMessages.length,emptyContentCount:rawEmptyCount,allMessages:rawMessages.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A',contentValue:Array.isArray(m.content)?JSON.stringify(m.content).substring(0,100):String(m.content).substring(0,100)}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP2_OUT'})}).catch(()=>{});
+    // #endregion
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:208',message:'rawMessages after readSessionMessages',data:{count:rawMessages.length,emptyContentCount:rawMessages.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length,sampleMessages:rawMessages.slice(0,3).map((msg:unknown)=>{const m=msg as Record<string,unknown>;return{role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A'}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     // Check for empty content arrays in raw messages
     const emptyContentMessages = rawMessages.filter((msg) => {
@@ -248,9 +278,41 @@ export const chatHandlers: GatewayRequestHandlers = {
     const defaultLimit = 200;
     const requested = typeof limit === "number" ? limit : defaultLimit;
     const max = Math.min(hardMax, requested);
+    
+    // #region agent log - STEP 3: slice INPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:263',message:'STEP3 slice INPUT',data:{rawMessagesCount:rawMessages.length,max,hardMax,defaultLimit,requested,willSlice:rawMessages.length>max},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP3_IN'})}).catch(()=>{});
+    // #endregion
+    
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
+    
+    // #region agent log - STEP 3: slice OUTPUT
+    const slicedEmptyCount = sliced.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:266',message:'STEP3 slice OUTPUT',data:{count:sliced.length,emptyContentCount:slicedEmptyCount,allMessages:sliced.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A',contentValue:Array.isArray(m.content)?JSON.stringify(m.content).substring(0,100):String(m.content).substring(0,100)}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP3_OUT'})}).catch(()=>{});
+    // #endregion
+    
+    // #region agent log - STEP 4: stripEnvelopeFromMessages INPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:269',message:'STEP4 stripEnvelopeFromMessages INPUT',data:{slicedCount:sliced.length,emptyContentCount:slicedEmptyCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP4_IN'})}).catch(()=>{});
+    // #endregion
+    
     const sanitized = stripEnvelopeFromMessages(sliced);
-    const capped = capArrayByJsonBytes(sanitized, getMaxChatHistoryMessagesBytes()).items;
+    
+    // #region agent log - STEP 4: stripEnvelopeFromMessages OUTPUT
+    const sanitizedEmptyCount = sanitized.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:272',message:'STEP4 stripEnvelopeFromMessages OUTPUT',data:{count:sanitized.length,emptyContentCount:sanitizedEmptyCount,changed:sanitized!==sliced,allMessages:sanitized.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A',contentValue:Array.isArray(m.content)?JSON.stringify(m.content).substring(0,100):String(m.content).substring(0,100)}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP4_OUT'})}).catch(()=>{});
+    // #endregion
+    
+    const maxBytes = getMaxChatHistoryMessagesBytes();
+    
+    // #region agent log - STEP 5: capArrayByJsonBytes INPUT
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:275',message:'STEP5 capArrayByJsonBytes INPUT',data:{sanitizedCount:sanitized.length,emptyContentCount:sanitizedEmptyCount,maxBytes},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP5_IN'})}).catch(()=>{});
+    // #endregion
+    
+    const capped = capArrayByJsonBytes(sanitized, maxBytes).items;
+    
+    // #region agent log - STEP 5: capArrayByJsonBytes OUTPUT
+    const cappedEmptyCount = capped.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:278',message:'STEP5 capArrayByJsonBytes OUTPUT',data:{count:capped.length,emptyContentCount:cappedEmptyCount,removed:capped.length!==sanitized.length,allMessages:capped.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A',contentValue:Array.isArray(m.content)?JSON.stringify(m.content).substring(0,100):String(m.content).substring(0,100)}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP5_OUT'})}).catch(()=>{});
+    // #endregion
     
     context.logGateway.info(
       `[CHAT.HISTORY] Processed: sliced=${sliced.length} sanitized=${sanitized.length} capped=${capped.length}`,
@@ -282,6 +344,11 @@ export const chatHandlers: GatewayRequestHandlers = {
     context.logGateway.info(
       `[MODEL] chat.history: provider=${provider} model=${model} baseUrl=${modelBaseUrl ?? "default"} api=${modelApi ?? "unknown"} sessionKey=${sessionKey} messageCount=${capped.length}`,
     );
+    
+    // #region agent log - STEP 6: respond INPUT
+    const finalEmptyCount = capped.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+    fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.ts:313',message:'STEP6 respond INPUT',data:{count:capped.length,emptyContentCount:finalEmptyCount,thinkingLevel,provider,model,modelBaseUrl,modelApi,allMessages:capped.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A',contentValue:Array.isArray(m.content)?JSON.stringify(m.content).substring(0,100):String(m.content).substring(0,100)}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'STEP6_IN'})}).catch(()=>{});
+    // #endregion
     
     respond(true, {
       sessionKey,

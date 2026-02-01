@@ -23,12 +23,23 @@ export function readSessionMessages(
     try {
       const parsed = JSON.parse(line);
       if (parsed?.message) {
+        // #region agent log - per message in file
+        const msg = parsed.message as Record<string, unknown>;
+        if (msg.role === "assistant") {
+          const isEmpty = Array.isArray(msg.content) && msg.content.length === 0;
+          fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'session-utils.fs.ts:26',message:'readSessionMessages parsing assistant message',data:{role:msg.role,timestamp:msg.timestamp,hasContent:!!msg.content,contentType:typeof msg.content,contentIsArray:Array.isArray(msg.content),contentLength:Array.isArray(msg.content)?msg.content.length:'N/A',isEmpty,allKeys:Object.keys(msg),rawLinePreview:line.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'READ_FILE'})}).catch(()=>{});
+        }
+        // #endregion
         messages.push(parsed.message);
       }
     } catch {
       // ignore bad lines
     }
   }
+  // #region agent log - readSessionMessages complete
+  const emptyCount = messages.filter((msg:unknown)=>{const m=msg as Record<string,unknown>;return m.role==='assistant'&&Array.isArray(m.content)&&m.content.length===0}).length;
+  fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'session-utils.fs.ts:38',message:'readSessionMessages complete',data:{filePath,messageCount:messages.length,emptyContentCount:emptyCount,allMessages:messages.map((msg:unknown,idx:number)=>{const m=msg as Record<string,unknown>;return{index:idx,role:m.role,hasContent:!!m.content,contentType:typeof m.content,contentIsArray:Array.isArray(m.content),contentLength:Array.isArray(m.content)?m.content.length:'N/A'}})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'READ_FILE_OUT'})}).catch(()=>{});
+  // #endregion
   return messages;
 }
 
