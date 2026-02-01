@@ -49,3 +49,55 @@ else
   echo "⚠ Warning: openclaw.json not found at $OPENCLAW_CONFIG"
   echo "  The file should be created by docker-setup.sh. Continuing..."
 fi
+
+# Open Control UI in browser with gateway token
+echo ""
+echo "==> Opening Control UI in browser..."
+if [ -f "$OPENCLAW_CONFIG" ]; then
+  # Read gateway config from openclaw.json (no fallbacks)
+  GATEWAY_CONFIG=$(sudo python3 -c "
+import json
+with open('$OPENCLAW_CONFIG') as f:
+    c = json.load(f)
+gateway = c.get('gateway', {})
+port = gateway.get('port')
+bind = gateway.get('bind')
+token = gateway.get('auth', {}).get('token')
+if port and bind and token:
+    print(f'{port}|{bind}|{token}')
+" 2>/dev/null)
+  
+  if [ -n "$GATEWAY_CONFIG" ]; then
+    IFS='|' read -r GATEWAY_PORT GATEWAY_BIND GATEWAY_TOKEN <<< "$GATEWAY_CONFIG"
+    
+    # Determine the host based on bind mode
+    if [ "$GATEWAY_BIND" = "lan" ]; then
+      LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || \
+               ip route get 1.1.1.1 2>/dev/null | awk '{print $7}' | head -1 || \
+               hostname -i 2>/dev/null | awk '{print $1}' || \
+               echo "127.0.0.1")
+      CONTROL_UI_URL="http://${LAN_IP}:${GATEWAY_PORT}/?token=${GATEWAY_TOKEN}"
+    else
+      CONTROL_UI_URL="http://127.0.0.1:${GATEWAY_PORT}/?token=${GATEWAY_TOKEN}"
+    fi
+    
+    echo "Control UI URL: $CONTROL_UI_URL"
+    echo "Gateway Token: ${GATEWAY_TOKEN:0:8}...${GATEWAY_TOKEN: -8}"
+    
+    # Try to open in browser
+    if command -v open >/dev/null 2>&1; then
+      open "$CONTROL_UI_URL" 2>/dev/null && echo "✓ Opened Control UI in browser" || echo "⚠️  Could not open browser automatically"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$CONTROL_UI_URL" 2>/dev/null && echo "✓ Opened Control UI in browser" || echo "⚠️  Could not open browser automatically"
+    elif command -v start >/dev/null 2>&1; then
+      start "$CONTROL_UI_URL" 2>/dev/null && echo "✓ Opened Control UI in browser" || echo "⚠️  Could not open browser automatically"
+    else
+      echo "⚠️  No browser command found. Please open manually:"
+      echo "   $CONTROL_UI_URL"
+    fi
+  else
+    echo "⚠️  Warning: Gateway config (port, bind, or token) not found in openclaw.json"
+  fi
+else
+  echo "⚠️  Warning: openclaw.json not found at $OPENCLAW_CONFIG"
+fi
