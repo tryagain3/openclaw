@@ -419,15 +419,6 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
   const history = Array.isArray(props.messages) ? props.messages : [];
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
-  
-  console.groupCollapsed(`%c[BUILD] buildChatItems`, "color: #795548; font-weight: bold");
-  console.log("Input:", {
-    historyLength: history.length,
-    toolsLength: tools.length,
-    hasStream: props.stream !== null,
-    streamLength: props.stream?.length ?? 0,
-    showThinking: props.showThinking,
-  });
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
   if (historyStart > 0) {
     items.push({

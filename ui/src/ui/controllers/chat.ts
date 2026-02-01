@@ -41,7 +41,7 @@ export async function loadChatHistory(state: ChatState) {
     };
     
     console.group(`%c[API] chat.history`, "color: #2196F3; font-weight: bold");
-    console.log("Request:", requestParams);
+    console.log("📤 Request:", requestParams);
     
     const requestStartTime = Date.now();
     let res: { messages?: unknown[]; thinkingLevel?: string | null };
@@ -52,10 +52,16 @@ export async function loadChatHistory(state: ChatState) {
         thinkingLevel?: string | null;
       };
       const requestDuration = Date.now() - requestStartTime;
-      console.log(`✅ Success (${requestDuration}ms)`);
+      console.log(`✅ Request succeeded (${requestDuration}ms)`);
     } catch (err) {
       const requestDuration = Date.now() - requestStartTime;
-      console.error(`❌ Failed (${requestDuration}ms):`, err);
+      console.error(`❌ Request failed (${requestDuration}ms):`, err);
+      console.error("Error details:", {
+        name: err instanceof Error ? err.name : "Unknown",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      console.groupEnd();
       throw err;
     }
     
@@ -64,7 +70,7 @@ export async function loadChatHistory(state: ChatState) {
     const hasMessages = "messages" in res;
     const messagesIsArray = Array.isArray(res.messages);
     
-    console.log("Response:", {
+    console.log("📥 Response:", {
       duration: `${requestDuration}ms`,
       messageCount,
       hasMessages,
@@ -73,12 +79,23 @@ export async function loadChatHistory(state: ChatState) {
       responseKeys: res !== null && typeof res === "object" ? Object.keys(res) : [],
     });
     
+    // Validate response
+    if (!res || typeof res !== "object") {
+      console.error("❌ Invalid response: not an object", { res, resType: typeof res });
+      console.groupEnd();
+      throw new Error(`Invalid response: expected object, got ${typeof res}`);
+    }
+    
     if (!hasMessages) {
-      console.warn("⚠️ Missing 'messages' property");
+      console.warn("⚠️ Response missing 'messages' property");
+      console.log("Full response:", JSON.parse(JSON.stringify(res)));
     } else if (!messagesIsArray) {
-      console.error("❌ 'messages' is not an array:", res.messages);
+      console.error("❌ Response 'messages' is not an array", {
+        messagesType: typeof res.messages,
+        messagesValue: res.messages,
+      });
     } else if (messageCount === 0) {
-      console.warn("⚠️ Empty messages array");
+      console.warn("⚠️ Response has empty messages array");
       console.log("Full response:", JSON.parse(JSON.stringify(res)));
     } else if (Array.isArray(res.messages)) {
       // Check for empty content arrays
