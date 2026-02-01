@@ -391,9 +391,7 @@ export async function sendChatMessage(
   
   if (hasAttachments && attachments) {
     console.log(`[MODEL_API] Attachments:`, attachments.map(att => ({
-      type: att.type,
       mimeType: att.mimeType,
-      fileName: att.fileName,
       dataLength: att.dataUrl?.length ?? 0,
     })));
   }
@@ -480,6 +478,13 @@ export function handleChatEvent(
   const isOwnRun = payload.runId === state.chatRunId;
   const streamAge = state.chatStreamStartedAt ? Date.now() - state.chatStreamStartedAt : null;
   
+  // Track if we've seen any events for this run
+  if (isOwnRun && !state.chatStream && payload.state !== "delta") {
+    console.warn(`[MODEL_API] ⚠️ Received ${payload.state} event but no deltas were received yet`);
+    console.warn(`[MODEL_API] This suggests backend did not send any assistant stream events`);
+    console.warn(`[MODEL_API] Backend only sends deltas when: evt.stream === "assistant" && typeof evt.data?.text === "string"`);
+  }
+  
   if (payload.state === "delta") {
     // Log raw delta payload for debugging
     if (isOwnRun && !state.chatStream) {
@@ -552,12 +557,20 @@ export function handleChatEvent(
     if (!receivedAnyDeltas && isOwnRun) {
       console.error(`[MODEL_API] ⚠️ CRITICAL: NO DELTAS RECEIVED!`);
       console.error(`[MODEL_API] Stream length is 0, meaning no delta events were processed`);
+      console.error(`[MODEL_API] Root cause analysis:`);
+      console.error(`  - Backend emitChatFinal reads from chatRunState.buffers`);
+      console.error(`  - If no deltas were sent, buffer is empty`);
+      console.error(`  - Empty buffer → message property is undefined in final payload`);
+      console.error(`  - This explains why final payload has no message property`);
       console.error(`[MODEL_API] Possible causes:`);
-      console.error(`  1. Backend did not send any delta events`);
+      console.error(`  1. Backend did not send any delta events (emitChatDelta never called)`);
       console.error(`  2. Delta events were sent but extractText() returned empty`);
       console.error(`  3. Delta events were filtered out or not matching runId`);
-      console.error(`[MODEL_API] Check backend logs for [MODEL_API] Response received`);
-      console.error(`[MODEL_API] Check if backend sent delta events via emitChatDelta`);
+      console.error(`  4. Backend streamFn received empty response from model API`);
+      console.error(`[MODEL_API] Check backend logs for:`);
+      console.error(`  - [MODEL_API] Response received (should show payload)`);
+      console.error(`  - emitChatDelta calls (should see delta events)`);
+      console.error(`  - emitChatFinal buffer state (should show buffer content)`);
     }
     
     console.log(`finalPreview: "${finalText.substring(0, 200)}${finalText.length > 200 ? "..." : ""}"`);
@@ -623,8 +636,22 @@ export function handleChatEvent(
         console.warn(`[MODEL_API] This suggests content was in final payload but not streamed via deltas`);
       }
     } else {
-      console.error(`[MODEL_API] ⚠️ Final payload has no message property!`);
+      console.error(`[MODEL_API] ⚠️ CRITICAL: Final payload has no message property!`);
+      console.error(`[MODEL_API] This is the ROOT CAUSE of empty content arrays!`);
+      console.error(`[MODEL_API] Backend emitChatFinal logic:`);
+      console.error(`  - Gets text from chatRunState.buffers.get(clientRunId)`);
+      console.error(`  - If buffer is empty → message property is undefined`);
+      console.error(`  - Buffer is populated by emitChatDelta calls`);
+      console.error(`[MODEL_API] Since receivedAnyDeltas=${receivedAnyDeltas}, no deltas were received`);
+      console.error(`[MODEL_API] This means:`);
+      console.error(`  1. Either emitChatDelta was never called (no deltas sent)`);
+      console.error(`  2. Or deltas were sent but not received/filtered`);
       console.error(`[MODEL_API] Full payload:`, JSON.parse(JSON.stringify(payload)));
+      console.error(`[MODEL_API] Action items:`);
+      console.error(`  - Check backend logs for emitChatDelta calls`);
+      console.error(`  - Check backend logs for [MODEL_API] Response received`);
+      console.error(`  - Verify backend is calling emitChatDelta with correct runId`);
+      console.error(`  - Check if model API response was empty or malformed`);
     }
     
     console.log(`[MODEL_API] Streaming complete, message should be stored in session`);

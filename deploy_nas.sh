@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
+
+# Set Gemini API key (required for non-interactive onboarding)
+# You can either:
+# 1. Set it here directly (uncomment and replace with your API key):
+# export OPENCLAW_GEMINI_API_KEY="your-gemini-api-key-here"
+#
+# 2. Or set it before running: export OPENCLAW_GEMINI_API_KEY="your-key" && ./deploy_nas.sh
+# 3. Or pass it inline: OPENCLAW_GEMINI_API_KEY="your-key" ./deploy_nas.sh
+#
+# If not set, docker-setup.sh will exit with an error asking for it.
+
 sudo rm -rf /volume1/docker/openclaw/.openclaw/*
 sudo mkdir -p /volume1/docker/openclaw/.openclaw/workspace
 sudo chmod 777 /volume1/docker/openclaw/.openclaw/workspace
+export OPENCLAW_GEMINI_API_KEY="AIzaSyBIm02Uf2KuuiVEbtbMu7uR2kpLvhlT7ok"
 ./docker-setup.sh
 
 # Add controlUi configuration to openclaw.json (ensure controlUi comes before tailscale)

@@ -182,15 +182,39 @@ docker build \
   "$ROOT_DIR"
 
 echo ""
-echo "==> Onboarding (interactive)"
-echo "When prompted:"
+echo "==> Onboarding (non-interactive)"
+echo "Configuration:"
+echo "  - Mode: local"
+echo "  - Flow: quickstart"
 echo "  - Gateway bind: lan"
 echo "  - Gateway auth: token"
 echo "  - Gateway token: $OPENCLAW_GATEWAY_TOKEN"
-echo "  - Tailscale exposure: Off"
-echo "  - Install Gateway daemon: No"
+echo "  - Tailscale: off"
+echo "  - Auth: Google provider (gemini-api-key)"
+echo "  - Skip: channels, skills, hooks (hooks auto-skipped in non-interactive)"
 echo ""
-docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli onboard --no-install-daemon
+# Note: Gemini API key should be set via OPENCLAW_GEMINI_API_KEY environment variable
+# Set it before running this script: export OPENCLAW_GEMINI_API_KEY="your-api-key"
+if [[ -z "${OPENCLAW_GEMINI_API_KEY:-}" ]]; then
+  echo "⚠️  Error: OPENCLAW_GEMINI_API_KEY not set"
+  echo "   Set it before running: export OPENCLAW_GEMINI_API_KEY=\"your-api-key\""
+  exit 1
+fi
+
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli onboard \
+  --non-interactive \
+  --accept-risk \
+  --mode local \
+  --flow quickstart \
+  --gateway-bind lan \
+  --gateway-auth token \
+  --gateway-token "$OPENCLAW_GATEWAY_TOKEN" \
+  --tailscale off \
+  --auth-choice gemini-api-key \
+  --gemini-api-key "$OPENCLAW_GEMINI_API_KEY" \
+  --skip-channels \
+  --skip-skills \
+  --no-install-daemon
 
 echo ""
 echo "==> Provider setup (optional)"

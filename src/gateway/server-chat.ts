@@ -164,7 +164,27 @@ export function createAgentEventHandler({
     jobState: "done" | "error",
     error?: unknown,
   ) => {
-    const text = chatRunState.buffers.get(clientRunId)?.trim() ?? "";
+    const bufferText = chatRunState.buffers.get(clientRunId);
+    const text = bufferText?.trim() ?? "";
+    const bufferHadContent = Boolean(bufferText && bufferText.trim().length > 0);
+    
+    // Log final emission to help debug empty content issues
+    console.log(
+      `[EMIT_FINAL] Emitting final: runId=${clientRunId} sessionKey=${sessionKey} seq=${seq} jobState=${jobState} bufferLength=${bufferText?.length ?? 0} bufferHadContent=${bufferHadContent} finalTextLength=${text.length}`,
+    );
+    
+    if (!bufferHadContent && jobState === "done") {
+      console.warn(
+        `[EMIT_FINAL] ⚠️ WARNING: Final event with empty buffer! runId=${clientRunId} sessionKey=${sessionKey}`,
+      );
+      console.warn(
+        `[EMIT_FINAL] This means no deltas were sent, so message property will be undefined`,
+      );
+      console.warn(
+        `[EMIT_FINAL] Check if assistant stream events were received: evt.stream === "assistant" && typeof evt.data?.text === "string"`,
+      );
+    }
+    
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     if (jobState === "done") {
@@ -181,6 +201,12 @@ export function createAgentEventHandler({
             }
           : undefined,
       };
+      
+      if (!text) {
+        console.warn(
+          `[EMIT_FINAL] Final payload will have undefined message property (buffer was empty)`,
+        );
+      }
       // Suppress webchat broadcast for heartbeat runs when showOk is false
       if (!shouldSuppressHeartbeatBroadcast(clientRunId)) {
         broadcast("chat", payload);
@@ -249,8 +275,48 @@ export function createAgentEventHandler({
 
     if (sessionKey) {
       nodeSendToSession(sessionKey, "agent", agentPayload);
+      
+      // Log all assistant stream events to debug why deltas might not be sent
+      if (evt.stream === "assistant") {
+        const hasText = typeof evt.data?.text === "string";
+        const textLength = hasText && typeof evt.data.text === "string" ? evt.data.text.length : 0;
+        console.log(
+          `[EMIT_DELTA] Assistant stream event: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq} isAborted=${isAborted} hasText=${hasText} textLength=${textLength} dataType=${typeof evt.data}`,
+        );
+        if (evt.data && typeof evt.data === "object") {
+          const dataAny = evt.data as Record<string, unknown>;
+          console.log(`[EMIT_DELTA] evt.data structure:`, {
+            keys: Object.keys(dataAny),
+            textType: typeof dataAny.text,
+            textLength: typeof dataAny.text === "string" ? dataAny.text.length : "N/A",
+            deltaType: typeof dataAny.delta,
+            hasDelta: "delta" in dataAny,
+          });
+        }
+      }
+      
       if (!isAborted && evt.stream === "assistant" && typeof evt.data?.text === "string") {
+        // Log delta emission to help debug empty content issues
+        const textLength = evt.data.text.length;
+        const textPreview = textLength > 100 ? evt.data.text.substring(0, 100) + "..." : evt.data.text;
+        console.log(
+          `[EMIT_DELTA] ✅ Sending delta: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq} textLength=${textLength} preview="${textPreview}"`,
+        );
         emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text);
+      } else if (!isAborted && evt.stream === "assistant") {
+        // Log when assistant stream event doesn't trigger delta (for debugging)
+        console.warn(
+          `[EMIT_DELTA] ⚠️ Assistant stream event but NO delta sent: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq}`,
+        );
+        console.warn(
+          `[EMIT_DELTA] Condition check: isAborted=${isAborted} stream=${evt.stream} hasText=${typeof evt.data?.text === "string"}`,
+        );
+        if (evt.data && typeof evt.data === "object") {
+          const dataAny = evt.data as Record<string, unknown>;
+          console.warn(`[EMIT_DELTA] evt.data keys:`, Object.keys(dataAny));
+          console.warn(`[EMIT_DELTA] evt.data.text:`, dataAny.text);
+          console.warn(`[EMIT_DELTA] evt.data.delta:`, dataAny.delta);
+        }
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
         if (chatLink) {
           const finished = chatRunState.registry.shift(evt.runId);
