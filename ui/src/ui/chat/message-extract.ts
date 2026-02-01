@@ -33,43 +33,13 @@ export function stripEnvelope(text: string): string {
   return text.slice(match[0].length);
 }
 
-// Track how many times we've logged to avoid spam
-let extractTextDebugCount = 0;
-const MAX_EXTRACT_DEBUG_LOGS = 20; // Increased to see more examples
-
 export function extractText(message: unknown): string | null {
   const m = message as Record<string, unknown>;
   const role = typeof m.role === "string" ? m.role : "";
   const content = m.content;
   
-  // Debug: log extraction attempts for first few messages
-  // Also log if we get null/empty result (to catch issues)
-  const shouldDebug = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
-  const shouldLogEmpty = extractTextDebugCount < MAX_EXTRACT_DEBUG_LOGS;
-  
   if (typeof content === "string") {
-    const beforeProcessing = content;
     const processed = role === "assistant" ? stripThinkingTags(content) : stripEnvelope(content);
-    if (shouldDebug) {
-      extractTextDebugCount++;
-      console.group(`%c[extractText] String content (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #2196F3; font-weight: bold");
-      console.log("Before processing:", {
-        role,
-        contentLength: content.length,
-        contentPreview: content.substring(0, 200),
-      });
-      console.log("After processing:", {
-        processedLength: processed?.length ?? 0,
-        processedPreview: processed?.substring(0, 200),
-        wasEmpty: !processed,
-        wasRemoved: beforeProcessing.length > 0 && (!processed || processed.length === 0),
-      });
-      if (beforeProcessing.length > 0 && (!processed || processed.length === 0)) {
-        console.warn("⚠️ Content was removed by processing!");
-        console.log("Full original content:", beforeProcessing);
-      }
-      console.groupEnd();
-    }
     return processed || null;
   }
   
@@ -97,107 +67,16 @@ export function extractText(message: unknown): string | null {
       })
       .filter((v): v is string => typeof v === "string" && v.length > 0);
     
-    if (shouldDebug && parts.length === 0) {
-      extractTextDebugCount++;
-      console.group(`%c[extractText] Array content empty (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #FF9800; font-weight: bold");
-      console.log("Role:", role);
-      console.log("Content array:", content);
-      console.log("Content items:", content.map((item: unknown, i: number) => {
-        const it = item as Record<string, unknown>;
-        return {
-          index: i,
-          type: it.type,
-          keys: Object.keys(it),
-          text: it.text,
-          content: it.content,
-          textType: typeof it.text,
-          textLength: typeof it.text === "string" ? it.text.length : 0,
-          textPreview: typeof it.text === "string" ? it.text.substring(0, 50) : undefined,
-        };
-      }));
-      console.log("Why extraction failed: No items with type='text' and text property found");
-      console.groupEnd();
-    }
-    
-    if (shouldDebug && parts.length > 0) {
-      extractTextDebugCount++;
-      console.log(`[extractText] Array content extracted (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
-        role,
-        partsCount: parts.length,
-        joinedLength: parts.join("\n").length,
-      });
-    }
-    
     if (parts.length > 0) {
       const joined = parts.join("\n");
-      const beforeProcessing = joined;
       const processed = role === "assistant" ? stripThinkingTags(joined) : stripEnvelope(joined);
-      if (shouldDebug) {
-        extractTextDebugCount++;
-        console.group(`%c[extractText] Array content extracted (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #4CAF50; font-weight: bold");
-        console.log("Before processing:", {
-          role,
-          partsCount: parts.length,
-          joinedLength: joined.length,
-          joinedPreview: joined.substring(0, 200),
-        });
-        console.log("After processing:", {
-          processedLength: processed?.length ?? 0,
-          processedPreview: processed?.substring(0, 200),
-          wasEmpty: !processed,
-          wasRemoved: beforeProcessing.length > 0 && (!processed || processed.length === 0),
-        });
-        if (beforeProcessing.length > 0 && (!processed || processed.length === 0)) {
-          console.warn("⚠️ Content was removed by processing!");
-          console.log("Full original joined content:", beforeProcessing);
-        }
-        console.groupEnd();
-      }
       return processed || null;
     }
   }
   
   if (typeof m.text === "string") {
     const processed = role === "assistant" ? stripThinkingTags(m.text) : stripEnvelope(m.text);
-    if (shouldDebug) {
-      extractTextDebugCount++;
-      console.log(`[extractText] Text property (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS}):`, {
-        role,
-        textLength: m.text.length,
-        processedLength: processed?.length ?? 0,
-      });
-    }
     return processed || null;
-  }
-  
-  if (shouldLogEmpty) {
-    extractTextDebugCount++;
-    console.group(`%c[extractText] No text found (${extractTextDebugCount}/${MAX_EXTRACT_DEBUG_LOGS})`, "color: #F44336; font-weight: bold");
-    console.log("Message structure:", {
-      role,
-      hasContent: !!content,
-      contentType: typeof content,
-      contentIsArray: Array.isArray(content),
-      contentLength: Array.isArray(content) ? content.length : "N/A",
-      hasText: !!m.text,
-      textType: typeof m.text,
-    });
-    console.log("Full message:", JSON.parse(JSON.stringify(message)));
-    if (Array.isArray(content)) {
-      console.log("Content array detail:", content.map((item: unknown, i: number) => {
-        const it = item as Record<string, unknown>;
-        return {
-          index: i,
-          type: it.type,
-          keys: Object.keys(it),
-          text: it.text,
-          textType: typeof it.text,
-          textLength: typeof it.text === "string" ? it.text.length : 0,
-          textPreview: typeof it.text === "string" ? it.text.substring(0, 100) : undefined,
-        };
-      }));
-    }
-    console.groupEnd();
   }
   
   return null;

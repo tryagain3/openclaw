@@ -1,14 +1,14 @@
-import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat";
-import { loadSessions } from "./controllers/sessions";
-import { generateUUID } from "./uuid";
-import { resetToolStream } from "./app-tool-stream";
-import { scheduleChatScroll } from "./app-scroll";
-import { setLastActiveSessionKey } from "./app-settings";
-import { normalizeBasePath } from "./navigation";
-import type { GatewayHelloOk } from "./gateway";
 import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 import type { OpenClawApp } from "./app";
+import { scheduleChatScroll } from "./app-scroll";
+import { setLastActiveSessionKey } from "./app-settings";
+import { resetToolStream } from "./app-tool-stream";
+import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat";
+import { loadSessions } from "./controllers/sessions";
+import type { GatewayHelloOk } from "./gateway";
+import { normalizeBasePath } from "./navigation";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types";
+import { generateUUID } from "./uuid";
 
 type ChatHost = {
   connected: boolean;
@@ -168,19 +168,11 @@ export async function handleSendChat(
 }
 
 export async function refreshChat(host: ChatHost) {
-  const timestamp = new Date().toISOString();
-  console.group(`%c[CHAT] refreshChat ${timestamp}`, "color: #4CAF50; font-weight: bold");
-  console.log("Host state:", {
-    connected: host.connected,
-    sessionKey: host.sessionKey,
-  });
   await Promise.all([
     loadChatHistory(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp, { activeMinutes: 0 }),
     refreshChatAvatar(host),
   ]);
-  console.log("✅ refreshChat completed");
-  console.groupEnd();
   scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0], true);
 }
 

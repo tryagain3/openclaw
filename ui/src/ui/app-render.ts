@@ -1,48 +1,21 @@
 import { html, nothing } from "lit";
 
-import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway";
-import type { AppViewState } from "./app-view-state";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
-import {
-  TAB_GROUPS,
-  iconForTab,
-  pathForTab,
-  subtitleForTab,
-  titleForTab,
-  type Tab,
-} from "./navigation";
-import { icons } from "./icons";
-import type { UiSettings } from "./storage";
-import type { ThemeMode } from "./theme";
-import type { ThemeTransitionContext } from "./theme-transition";
-import type {
-  ConfigSnapshot,
-  CronJob,
-  CronRunLogEntry,
-  CronStatus,
-  HealthSnapshot,
-  LogEntry,
-  LogLevel,
-  PresenceEntry,
-  ChannelsStatusSnapshot,
-  SessionsListResult,
-  SkillStatusReport,
-  StatusSummary,
-} from "./types";
-import type { ChatQueueItem, CronFormState } from "./ui-types";
 import { refreshChatAvatar } from "./app-chat";
-import { renderChat } from "./views/chat";
-import { renderConfig } from "./views/config";
-import { renderChannels } from "./views/channels";
-import { renderCron } from "./views/cron";
-import { renderDebug } from "./views/debug";
-import { renderInstances } from "./views/instances";
-import { renderLogs } from "./views/logs";
-import { renderNodes } from "./views/nodes";
-import { renderOverview } from "./views/overview";
-import { renderSessions } from "./views/sessions";
-import { renderExecApprovalPrompt } from "./views/exec-approval";
-import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation";
+import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers";
+import type { AppViewState } from "./app-view-state";
+import { loadChannels } from "./controllers/channels";
+import { loadChatHistory } from "./controllers/chat";
+import {
+  applyConfig,
+  loadConfig,
+  removeConfigFormValue,
+  runUpdate,
+  saveConfig,
+  updateConfigFormValue,
+} from "./controllers/config";
+import { addCronJob, loadCronRuns, removeCronJob, runCronJob, toggleCronJob } from "./controllers/cron";
+import { callDebugMethod, loadDebug } from "./controllers/debug";
 import {
   approveDevicePairing,
   loadDevices,
@@ -50,9 +23,14 @@ import {
   revokeDeviceToken,
   rotateDeviceToken,
 } from "./controllers/devices";
-import { renderSkills } from "./views/skills";
-import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers";
-import { loadChannels } from "./controllers/channels";
+import {
+  loadExecApprovals,
+  removeExecApprovalsFormValue,
+  saveExecApprovals,
+  updateExecApprovalsFormValue,
+} from "./controllers/exec-approvals";
+import { loadLogs } from "./controllers/logs";
+import { loadNodes } from "./controllers/nodes";
 import { loadPresence } from "./controllers/presence";
 import { deleteSession, loadSessions, patchSession } from "./controllers/sessions";
 import {
@@ -60,28 +38,27 @@ import {
   loadSkills,
   saveSkillApiKey,
   updateSkillEdit,
-  updateSkillEnabled,
-  type SkillMessage,
+  updateSkillEnabled
 } from "./controllers/skills";
-import { loadNodes } from "./controllers/nodes";
-import { loadChatHistory } from "./controllers/chat";
+import { icons } from "./icons";
 import {
-  applyConfig,
-  loadConfig,
-  runUpdate,
-  saveConfig,
-  updateConfigFormValue,
-  removeConfigFormValue,
-} from "./controllers/config";
-import {
-  loadExecApprovals,
-  removeExecApprovalsFormValue,
-  saveExecApprovals,
-  updateExecApprovalsFormValue,
-} from "./controllers/exec-approvals";
-import { loadCronRuns, toggleCronJob, runCronJob, removeCronJob, addCronJob } from "./controllers/cron";
-import { loadDebug, callDebugMethod } from "./controllers/debug";
-import { loadLogs } from "./controllers/logs";
+  TAB_GROUPS,
+  subtitleForTab,
+  titleForTab
+} from "./navigation";
+import { renderChannels } from "./views/channels";
+import { renderChat } from "./views/chat";
+import { renderConfig } from "./views/config";
+import { renderCron } from "./views/cron";
+import { renderDebug } from "./views/debug";
+import { renderExecApprovalPrompt } from "./views/exec-approval";
+import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation";
+import { renderInstances } from "./views/instances";
+import { renderLogs } from "./views/logs";
+import { renderNodes } from "./views/nodes";
+import { renderOverview } from "./views/overview";
+import { renderSessions } from "./views/sessions";
+import { renderSkills } from "./views/skills";
 
 const AVATAR_DATA_RE = /^data:/i;
 const AVATAR_HTTP_RE = /^https?:\/\//i;
@@ -427,22 +404,7 @@ export function renderApp(state: AppViewState) {
           : nothing}
 
         ${state.tab === "chat"
-          ? (() => {
-              const timestamp = new Date().toISOString();
-              console.group(`%c[RENDER] renderChat ${timestamp}`, "color: #F44336; font-weight: bold");
-              const messageCount = Array.isArray(state.chatMessages) ? state.chatMessages.length : 0;
-              console.log("Render state:", {
-                connected: state.connected,
-                sessionKey: state.sessionKey,
-                loading: state.chatLoading,
-                messageCount,
-                toolMessageCount: Array.isArray(state.chatToolMessages) ? state.chatToolMessages.length : 0,
-                hasStream: !!state.chatStream,
-                hasError: !!state.lastError,
-                error: state.lastError,
-              });
-              console.groupEnd();
-              return renderChat({
+          ? renderChat({
               sessionKey: state.sessionKey,
               onSessionKeyChange: (next) => {
                 state.sessionKey = next;
@@ -512,8 +474,7 @@ export function renderApp(state: AppViewState) {
               onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
               assistantName: state.assistantName,
               assistantAvatar: state.assistantAvatar,
-            });
-            })()
+            })
           : nothing}
 
         ${state.tab === "config"

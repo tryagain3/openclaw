@@ -181,29 +181,6 @@ function renderAttachmentPreview(props: ChatProps) {
 }
 
 export function renderChat(props: ChatProps) {
-  const timestamp = new Date().toISOString();
-  const messageCount = Array.isArray(props.messages) ? props.messages.length : 0;
-  const toolMessageCount = Array.isArray(props.toolMessages) ? props.toolMessages.length : 0;
-  
-  console.group(`%c[VIEW] renderChat ${timestamp}`, "color: #00BCD4; font-weight: bold");
-  console.log("Props:", {
-    connected: props.connected,
-    loading: props.loading,
-    sessionKey: props.sessionKey,
-    messageCount,
-    toolMessageCount,
-    hasStream: !!props.stream,
-    streamLength: props.stream?.length ?? 0,
-    disabledReason: props.disabledReason,
-    error: props.error,
-  });
-  if (props.error) {
-    console.error("❌ Chat error:", props.error);
-  }
-  if (props.disabledReason) {
-    console.warn("⚠️ Chat disabled:", props.disabledReason);
-  }
-  console.groupEnd();
   const canCompose = props.connected;
   const isBusy = props.sending || props.stream !== null;
   const canAbort = Boolean(props.canAbort && props.onAbort);
@@ -227,7 +204,6 @@ export function renderChat(props: ChatProps) {
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
   const chatItems = buildChatItems(props);
-  console.log("[chat] built chat items", { itemCount: chatItems.length });
   const thread = html`
     <div
       class="chat-thread"
@@ -472,36 +448,6 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       continue;
     }
 
-    // Debug: log first few messages to understand structure
-    if (i < historyStart + 5) {
-      console.group(`%c[BUILD] Sample message ${i}`, "color: #607D8B; font-weight: bold");
-      console.log("Raw message:", JSON.parse(JSON.stringify(msg)));
-      console.log("Normalized:", normalized);
-      const m = msg as Record<string, unknown>;
-      console.log("Content structure:", {
-        hasContent: !!m.content,
-        contentType: typeof m.content,
-        contentIsArray: Array.isArray(m.content),
-        contentValue: Array.isArray(m.content) 
-          ? m.content.map((item: unknown, idx: number) => {
-              const it = item as Record<string, unknown>;
-              return {
-                index: idx,
-                type: typeof item,
-                isObject: typeof item === "object" && item !== null,
-                keys: typeof item === "object" && item !== null ? Object.keys(it) : [],
-                itemType: it.type,
-                itemText: it.text,
-                itemTextType: typeof it.text,
-                itemTextLength: typeof it.text === "string" ? it.text.length : 0,
-                itemTextPreview: typeof it.text === "string" ? it.text.substring(0, 100) : undefined,
-              };
-            })
-          : m.content,
-      });
-      console.groupEnd();
-    }
-
     items.push({
       kind: "message",
       key: messageKey(msg, i),
@@ -532,19 +478,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     }
   }
 
-  const grouped = groupMessages(items);
-  console.log("Output:", {
-    rawItemsCount: items.length,
-    groupedItemsCount: grouped.length,
-  });
-  if (grouped.length > 0) {
-    console.log("First few items:", grouped.slice(0, 3).map((item) => ({
-      kind: item.kind,
-      key: item.key,
-    })));
-  }
-  console.groupEnd();
-  return grouped;
+  return groupMessages(items);
 }
 
 function messageKey(message: unknown, index: number): string {

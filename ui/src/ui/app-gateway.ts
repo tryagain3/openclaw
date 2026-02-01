@@ -1,32 +1,31 @@
-import { loadChatHistory } from "./controllers/chat";
-import { loadDevices } from "./controllers/devices";
-import { loadNodes } from "./controllers/nodes";
-import { loadAgents } from "./controllers/agents";
-import type { GatewayEventFrame, GatewayHelloOk } from "./gateway";
-import { GatewayBrowserClient } from "./gateway";
-import type { EventLogEntry } from "./app-events";
-import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types";
-import type { Tab } from "./navigation";
-import type { UiSettings } from "./storage";
-import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream";
+import type { OpenClawApp } from "./app";
 import { flushChatQueueForEvent } from "./app-chat";
+import type { EventLogEntry } from "./app-events";
 import {
   applySettings,
   loadCron,
   refreshActiveTab,
   setLastActiveSessionKey,
 } from "./app-settings";
-import { handleChatEvent, type ChatEventPayload } from "./controllers/chat";
+import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream";
+import { loadAgents } from "./controllers/agents";
+import { loadAssistantIdentity } from "./controllers/assistant-identity";
+import { handleChatEvent, loadChatHistory, type ChatEventPayload } from "./controllers/chat";
+import { loadDevices } from "./controllers/devices";
+import type { ExecApprovalRequest } from "./controllers/exec-approval";
 import {
   addExecApproval,
   parseExecApprovalRequested,
   parseExecApprovalResolved,
   removeExecApproval,
 } from "./controllers/exec-approval";
-import type { OpenClawApp } from "./app";
-import type { ExecApprovalRequest } from "./controllers/exec-approval";
-import { loadAssistantIdentity } from "./controllers/assistant-identity";
+import { loadNodes } from "./controllers/nodes";
 import { loadSessions } from "./controllers/sessions";
+import type { GatewayEventFrame, GatewayHelloOk } from "./gateway";
+import { GatewayBrowserClient } from "./gateway";
+import type { Tab } from "./navigation";
+import type { UiSettings } from "./storage";
+import type { AgentsListResult, HealthSnapshot, PresenceEntry, StatusSummary } from "./types";
 
 type GatewayHost = {
   settings: UiSettings;
@@ -139,10 +138,6 @@ export function connectGateway(host: GatewayHost) {
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
-      const timestamp = new Date().toISOString();
-      console.group(`%c[GATEWAY] onHello ${timestamp}`, "color: #9C27B0; font-weight: bold");
-      console.log("Refreshing active tab:", { tab: host.tab });
-      console.groupEnd();
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason }) => {

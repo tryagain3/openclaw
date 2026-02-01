@@ -1,11 +1,15 @@
+import type { OpenClawApp } from "./app";
+import { refreshChat } from "./app-chat";
+import { startDebugPolling, startLogsPolling, stopDebugPolling, stopLogsPolling } from "./app-polling";
+import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll";
+import { loadChannels } from "./controllers/channels";
 import { loadConfig, loadConfigSchema } from "./controllers/config";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron";
-import { loadChannels } from "./controllers/channels";
 import { loadDebug } from "./controllers/debug";
-import { loadLogs } from "./controllers/logs";
 import { loadDevices } from "./controllers/devices";
-import { loadNodes } from "./controllers/nodes";
 import { loadExecApprovals } from "./controllers/exec-approvals";
+import { loadLogs } from "./controllers/logs";
+import { loadNodes } from "./controllers/nodes";
 import { loadPresence } from "./controllers/presence";
 import { loadSessions } from "./controllers/sessions";
 import { loadSkills } from "./controllers/skills";
@@ -13,10 +17,6 @@ import { inferBasePathFromPathname, normalizeBasePath, normalizePath, pathForTab
 import { saveSettings, type UiSettings } from "./storage";
 import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition";
-import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll";
-import { startLogsPolling, stopLogsPolling, startDebugPolling, stopDebugPolling } from "./app-polling";
-import { refreshChat } from "./app-chat";
-import type { OpenClawApp } from "./app";
 
 type SettingsHost = {
   settings: UiSettings;
@@ -156,19 +156,11 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadExecApprovals(host as unknown as OpenClawApp);
   }
   if (host.tab === "chat") {
-    const timestamp = new Date().toISOString();
-    console.group(`%c[TAB] refreshActiveTab: chat ${timestamp}`, "color: #FF9800; font-weight: bold");
-    console.log("Tab state:", {
-      connected: host.connected,
-      sessionKey: host.sessionKey,
-      chatHasAutoScrolled: host.chatHasAutoScrolled,
-    });
     await refreshChat(host as unknown as Parameters<typeof refreshChat>[0]);
     scheduleChatScroll(
       host as unknown as Parameters<typeof scheduleChatScroll>[0],
       !host.chatHasAutoScrolled,
     );
-    console.groupEnd();
   }
   if (host.tab === "config") {
     await loadConfigSchema(host as unknown as OpenClawApp);
