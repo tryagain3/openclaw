@@ -3,6 +3,7 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 
 import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
+import { createInlineCodeState } from "../markdown/code-spans.js";
 import {
   isMessagingToolDuplicateNormalized,
   normalizeTextForComparison,
@@ -17,7 +18,6 @@ import {
   formatReasoningMessage,
   promoteThinkingTagsToBlocks,
 } from "./pi-embedded-utils.js";
-import { createInlineCodeState } from "../markdown/code-spans.js";
 
 export function handleMessageStart(
   ctx: EmbeddedPiSubscribeContext,
@@ -40,8 +40,9 @@ export function handleMessageUpdate(
   ctx: EmbeddedPiSubscribeContext,
   evt: AgentEvent & { message: AgentMessage; assistantMessageEvent?: unknown },
 ) {
-  const msg = evt.message;
-  if (msg?.role !== "assistant") return;
+  try {
+    const msg = evt.message;
+    if (msg?.role !== "assistant") return;
 
   const assistantEvent = evt.assistantMessageEvent;
   const assistantRecord =
@@ -49,6 +50,27 @@ export function handleMessageUpdate(
       ? (assistantEvent as Record<string, unknown>)
       : undefined;
   const evtType = typeof assistantRecord?.type === "string" ? assistantRecord.type : "";
+
+  // Log all assistant message events to debug why deltas might not be emitted
+  if (evtType === "text_delta" || evtType === "text_start" || evtType === "text_end") {
+    const delta = typeof assistantRecord?.delta === "string" ? assistantRecord.delta : "";
+    const content = typeof assistantRecord?.content === "string" ? assistantRecord.content : "";
+    console.log(
+      `[ASSISTANT_STREAM] handleMessageUpdate: runId=${ctx.params.runId} evtType=${evtType} deltaLength=${delta.length} contentLength=${content.length} hasDelta=${!!delta} hasContent=${!!content}`,
+    );
+  } else if (assistantRecord) {
+    // Log other event types to see what we're receiving
+    console.log(
+      `[ASSISTANT_STREAM] handleMessageUpdate: runId=${ctx.params.runId} evtType=${evtType} (not text_delta/text_start/text_end) keys=${Object.keys(assistantRecord).join(",")}`,
+    );
+    return;
+  } else {
+    // No assistantMessageEvent at all
+    console.log(
+      `[ASSISTANT_STREAM] handleMessageUpdate: runId=${ctx.params.runId} no assistantMessageEvent`,
+    );
+    return;
+  }
 
   if (evtType !== "text_delta" && evtType !== "text_start" && evtType !== "text_end") {
     return;
@@ -87,6 +109,9 @@ export function handleMessageUpdate(
   }
 
   if (chunk) {
+    console.log(
+      `[ASSISTANT_STREAM] Processing chunk: runId=${ctx.params.runId} chunkLength=${chunk.length} evtType=${evtType} deltaBufferLength=${ctx.state.deltaBuffer.length}`,
+    );
     ctx.state.deltaBuffer += chunk;
     if (ctx.blockChunker) {
       ctx.blockChunker.append(chunk);
@@ -114,6 +139,9 @@ export function handleMessageUpdate(
     if (cleanedText.startsWith(previousCleanedText)) {
       const deltaText = cleanedText.slice(previousCleanedText.length);
       ctx.state.lastStreamedAssistant = next;
+      console.log(
+        `[ASSISTANT_STREAM] ✅ Emitting assistant event: runId=${ctx.params.runId} deltaLength=${deltaText.length} textLength=${cleanedText.length} previousLength=${previousText.length}`,
+      );
       emitAgentEvent({
         runId: ctx.params.runId,
         stream: "assistant",
@@ -152,6 +180,20 @@ export function handleMessageUpdate(
       ctx.emitBlockChunk(ctx.state.blockBuffer);
       ctx.state.blockBuffer = "";
     }
+  }
+  } catch (error) {
+    console.error(
+      `[ASSISTANT_STREAM] ❌ Error in handleMessageUpdate: runId=${ctx.params.runId}`,
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        evtType: typeof evt.assistantMessageEvent === "object" && evt.assistantMessageEvent
+          ? (evt.assistantMessageEvent as Record<string, unknown>).type
+          : "unknown",
+      },
+    );
+    // Re-throw to prevent silent failures
+    throw error;
   }
 }
 

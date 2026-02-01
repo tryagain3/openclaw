@@ -678,34 +678,270 @@ export async function runEmbeddedAttempt(
         const wrappedOptions = {
           ...opts,
           onPayload: (payload: unknown) => {
-            payloadCount++;
-            if (!responseReceived) {
-              responseReceived = true;
-              const duration = Date.now() - requestStartTime;
-              log.info(
-                `[MODEL_API] Response received (first payload, ${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id}`,
-              );
-              // Log payload structure (but not full content to avoid spam)
-              try {
-                const payloadStr = JSON.stringify(payload);
-                const payloadPreview = payloadStr.length > 500 ? payloadStr.substring(0, 500) + "..." : payloadStr;
-                log.info(`[MODEL_API] Response payload preview:`, { preview: payloadPreview });
-              } catch {
-                log.info(`[MODEL_API] Response payload: [non-serializable]`);
-              }
-            } else {
-              // Log subsequent streaming chunks (but limit frequency to avoid spam)
-              if (payloadCount % 10 === 0 || payloadCount <= 3) {
+            try {
+              payloadCount++;
+              if (!responseReceived) {
+                responseReceived = true;
+                const duration = Date.now() - requestStartTime;
                 log.info(
-                  `[MODEL_API] Streaming chunk #${payloadCount}: provider=${modelInfo.provider} model=${modelInfo.id}`,
+                  `[MODEL_API] Response received (first payload, ${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id}`,
                 );
+                // Log payload structure (but not full content to avoid spam)
+                try {
+                  const payloadStr = JSON.stringify(payload);
+                  const payloadPreview = payloadStr.length > 500 ? payloadStr.substring(0, 500) + "..." : payloadStr;
+                  log.info(`[MODEL_API] Response payload preview:`, { preview: payloadPreview });
+                } catch (e) {
+                  log.warn(`[MODEL_API] Response payload: [non-serializable]`, { error: e });
+                }
+              } else {
+                // Log subsequent streaming chunks (but limit frequency to avoid spam)
+                if (payloadCount % 10 === 0 || payloadCount <= 3) {
+                  log.info(
+                    `[MODEL_API] Streaming chunk #${payloadCount}: provider=${modelInfo.provider} model=${modelInfo.id}`,
+                  );
+                }
+              }
+              opts?.onPayload?.(payload);
+            } catch (error) {
+              log.error(
+                `[MODEL_API] Error in onPayload handler: provider=${modelInfo.provider} model=${modelInfo.id} payloadCount=${payloadCount}`,
+                {
+                  error: error instanceof Error ? error.message : String(error),
+                  stack: error instanceof Error ? error.stack : undefined,
+                },
+              );
+              // Still call original handler if possible
+              try {
+                opts?.onPayload?.(payload);
+              } catch (e) {
+                log.error(`[MODEL_API] Error calling original onPayload:`, {
+                  error: e instanceof Error ? e.message : String(e),
+                });
               }
             }
-            opts?.onPayload?.(payload);
+          },
+          onError: (error: unknown) => {
+            const duration = Date.now() - requestStartTime;
+            // Extract error message, handling nested JSON structures
+            let errorMessage = error instanceof Error ? error.message : String(error);
+            let errorString = errorMessage.toLowerCase();
+            
+            // Try to parse nested JSON error messages (common in API responses)
+            try {
+              const parsed = JSON.parse(errorMessage);
+              if (parsed && typeof parsed === "object") {
+                // Extract nested error message if present
+                const nestedError = parsed.error?.message || parsed.message || parsed.error;
+                if (nestedError && typeof nestedError === "string") {
+                  errorMessage = nestedError;
+                  errorString = nestedError.toLowerCase();
+                } else if (nestedError && typeof nestedError === "object") {
+                  // Handle double-nested errors
+                  const doubleNested = nestedError.message || nestedError.error?.message || JSON.stringify(nestedError);
+                  if (typeof doubleNested === "string") {
+                    errorMessage = doubleNested;
+                    errorString = doubleNested.toLowerCase();
+                  }
+                }
+              }
+            } catch {
+              // Not JSON, use original message
+            }
+            
+            // Classify error type
+            let errorType = "unknown";
+            let errorDetails: Record<string, unknown> = {};
+            
+            // Check for authentication errors (wrong token, expired, etc.)
+            if (
+              /invalid[_ ]?api[_ ]?key/i.test(errorString) ||
+              /incorrect api key/i.test(errorString) ||
+              /invalid token/i.test(errorString) ||
+              /authentication/i.test(errorString) ||
+              /unauthorized/i.test(errorString) ||
+              /forbidden/i.test(errorString) ||
+              /401/i.test(errorString) ||
+              /403/i.test(errorString) ||
+              /no credentials found/i.test(errorString) ||
+              /no api key found/i.test(errorString) ||
+              /token.*expired/i.test(errorString)
+            ) {
+              errorType = "authentication";
+              errorDetails.authError = true;
+              log.error(
+                `[MODEL_API] ❌ AUTHENTICATION ERROR (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id}`,
+                {
+                  error: errorMessage,
+                  name: error instanceof Error ? error.name : "Unknown",
+                  stack: error instanceof Error ? error.stack : undefined,
+                  errorType: "authentication",
+                  suggestion: "Check API key/token in credentials. Run 'openclaw models auth login --provider google' to update.",
+                },
+              );
+            }
+            // Check for quota/rate limit errors (including RESOURCE_EXHAUSTED)
+            else if (
+              /rate[_ ]limit/i.test(errorString) ||
+              /too many requests/i.test(errorString) ||
+              /429/i.test(errorString) ||
+              /exceeded.*quota/i.test(errorString) ||
+              /resource.*exhausted/i.test(errorString) ||
+              /quota.*exceeded/i.test(errorString) ||
+              /usage limit/i.test(errorString) ||
+              /insufficient credits/i.test(errorString) ||
+              /credit balance/i.test(errorString) ||
+              /402/i.test(errorString) ||
+              /payment required/i.test(errorString) ||
+              /resource_exhausted/i.test(errorString) ||
+              /free[_ ]tier/i.test(errorString) ||
+              /limit:\s*0/i.test(errorString)
+            ) {
+              errorType = "quota_rate_limit";
+              errorDetails.quotaError = true;
+              
+              // Extract retry delay if present
+              let retryAfter: string | undefined;
+              const retryMatch = errorMessage.match(/retry.*?(\d+(?:\.\d+)?)\s*s/i);
+              if (retryMatch) {
+                retryAfter = `${retryMatch[1]}s`;
+              }
+              
+              log.error(
+                `[MODEL_API] ❌ QUOTA/RATE LIMIT ERROR (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id}${retryAfter ? ` retryAfter=${retryAfter}` : ""}`,
+                {
+                  error: errorMessage.substring(0, 500), // Truncate very long error messages
+                  name: error instanceof Error ? error.name : "Unknown",
+                  stack: error instanceof Error ? error.stack : undefined,
+                  errorType: "quota_rate_limit",
+                  retryAfter,
+                  suggestion: retryAfter 
+                    ? `Quota exceeded. Retry after ${retryAfter}. Check your API quota/credits or upgrade your plan.`
+                    : "Check API quota/credits. Wait before retrying or upgrade your plan.",
+                },
+              );
+            }
+            // Generic error logging
+            else {
+              log.error(
+                `[MODEL_API] Stream error (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id}`,
+                {
+                  error: errorMessage.substring(0, 500), // Truncate very long error messages
+                  name: error instanceof Error ? error.name : "Unknown",
+                  stack: error instanceof Error ? error.stack : undefined,
+                  errorType: "unknown",
+                },
+              );
+            }
+            
+            // Call original error handler if it exists
+            try {
+              if (opts && typeof opts === "object" && "onError" in opts && typeof opts.onError === "function") {
+                opts.onError(error);
+              }
+            } catch (e) {
+              log.error(`[MODEL_API] Error calling original onError:`, {
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }
           },
         };
         
-        const result = originalStreamFn(model as Model<Api>, context as Parameters<StreamFn>[1], wrappedOptions);
+        let result;
+        try {
+          result = originalStreamFn(model as Model<Api>, context as Parameters<StreamFn>[1], wrappedOptions);
+        } catch (error) {
+          const duration = Date.now() - requestStartTime;
+          // Extract error message, handling nested JSON structures
+          let errorMessage = error instanceof Error ? error.message : String(error);
+          try {
+            const parsed = JSON.parse(errorMessage);
+            if (parsed && typeof parsed === "object") {
+              const nestedError = parsed.error?.message || parsed.message || parsed.error;
+              if (nestedError && typeof nestedError === "string") {
+                errorMessage = nestedError;
+              } else if (nestedError && typeof nestedError === "object") {
+                const doubleNested = nestedError.message || nestedError.error?.message || JSON.stringify(nestedError);
+                if (typeof doubleNested === "string") {
+                  errorMessage = doubleNested;
+                }
+              }
+            }
+          } catch {
+            // Not JSON, use original message
+          }
+          const errorString = errorMessage.toLowerCase();
+          
+          if (
+            /invalid[_ ]?api[_ ]?key/i.test(errorString) ||
+            /incorrect api key/i.test(errorString) ||
+            /invalid token/i.test(errorString) ||
+            /authentication/i.test(errorString) ||
+            /unauthorized/i.test(errorString) ||
+            /forbidden/i.test(errorString) ||
+            /401/i.test(errorString) ||
+            /403/i.test(errorString) ||
+            /no credentials found/i.test(errorString) ||
+            /no api key found/i.test(errorString) ||
+            /token.*expired/i.test(errorString)
+          ) {
+            log.error(
+              `[MODEL_API] ❌ AUTHENTICATION ERROR calling streamFn (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id} sessionKey=${params.sessionKey} runId=${params.runId}`,
+              {
+                error: errorMessage.substring(0, 500),
+                name: error instanceof Error ? error.name : "Unknown",
+                stack: error instanceof Error ? error.stack : undefined,
+                errorType: "authentication",
+                suggestion: "Check API key/token in credentials. Run 'openclaw models auth login --provider google' to update.",
+              },
+            );
+          } else if (
+            /rate[_ ]limit/i.test(errorString) ||
+            /too many requests/i.test(errorString) ||
+            /429/i.test(errorString) ||
+            /exceeded.*quota/i.test(errorString) ||
+            /resource.*exhausted/i.test(errorString) ||
+            /quota.*exceeded/i.test(errorString) ||
+            /usage limit/i.test(errorString) ||
+            /insufficient credits/i.test(errorString) ||
+            /credit balance/i.test(errorString) ||
+            /402/i.test(errorString) ||
+            /payment required/i.test(errorString) ||
+            /resource_exhausted/i.test(errorString) ||
+            /free[_ ]tier/i.test(errorString) ||
+            /limit:\s*0/i.test(errorString)
+          ) {
+            let retryAfter: string | undefined;
+            const retryMatch = errorMessage.match(/retry.*?(\d+(?:\.\d+)?)\s*s/i);
+            if (retryMatch) {
+              retryAfter = `${retryMatch[1]}s`;
+            }
+            log.error(
+              `[MODEL_API] ❌ QUOTA/RATE LIMIT ERROR calling streamFn (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id} sessionKey=${params.sessionKey} runId=${params.runId}${retryAfter ? ` retryAfter=${retryAfter}` : ""}`,
+              {
+                error: errorMessage.substring(0, 500),
+                name: error instanceof Error ? error.name : "Unknown",
+                stack: error instanceof Error ? error.stack : undefined,
+                errorType: "quota_rate_limit",
+                retryAfter,
+                suggestion: retryAfter 
+                  ? `Quota exceeded. Retry after ${retryAfter}. Check your API quota/credits or upgrade your plan.`
+                  : "Check API quota/credits. Wait before retrying or upgrade your plan.",
+              },
+            );
+          } else {
+            log.error(
+              `[MODEL_API] ❌ Error calling streamFn (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id} sessionKey=${params.sessionKey} runId=${params.runId}`,
+              {
+                error: errorMessage.substring(0, 500),
+                name: error instanceof Error ? error.name : "Unknown",
+                stack: error instanceof Error ? error.stack : undefined,
+                errorType: "unknown",
+              },
+            );
+          }
+          throw error;
+        }
         
         // Handle promise rejection to catch errors and completion
         if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
@@ -716,15 +952,69 @@ export async function runEmbeddedAttempt(
             );
           }).catch((err: unknown) => {
             const duration = Date.now() - requestStartTime;
-            log.error(
-              `[MODEL_API] Request failed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
-            );
-            log.error(`[MODEL_API] Error:`, {
-              message: err instanceof Error ? err.message : String(err),
-              name: err instanceof Error ? err.name : "Unknown",
-            });
-            if (err instanceof Error && err.stack) {
-              log.error(`[MODEL_API] Error stack:`, { stack: err.stack });
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            const errorString = errorMessage.toLowerCase();
+            
+            // Classify error type
+            let errorType = "unknown";
+            if (
+              /invalid[_ ]?api[_ ]?key/i.test(errorString) ||
+              /incorrect api key/i.test(errorString) ||
+              /invalid token/i.test(errorString) ||
+              /authentication/i.test(errorString) ||
+              /unauthorized/i.test(errorString) ||
+              /forbidden/i.test(errorString) ||
+              /401/i.test(errorString) ||
+              /403/i.test(errorString) ||
+              /no credentials found/i.test(errorString) ||
+              /no api key found/i.test(errorString) ||
+              /token.*expired/i.test(errorString)
+            ) {
+              errorType = "authentication";
+              log.error(
+                `[MODEL_API] ❌ AUTHENTICATION ERROR - Request failed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
+                {
+                  message: errorMessage,
+                  name: err instanceof Error ? err.name : "Unknown",
+                  stack: err instanceof Error ? err.stack : undefined,
+                  errorType: "authentication",
+                  suggestion: "Check API key/token in credentials. Run 'openclaw models auth login --provider google' to update.",
+                },
+              );
+            } else if (
+              /rate[_ ]limit/i.test(errorString) ||
+              /too many requests/i.test(errorString) ||
+              /429/i.test(errorString) ||
+              /exceeded.*quota/i.test(errorString) ||
+              /resource.*exhausted/i.test(errorString) ||
+              /quota.*exceeded/i.test(errorString) ||
+              /usage limit/i.test(errorString) ||
+              /insufficient credits/i.test(errorString) ||
+              /credit balance/i.test(errorString) ||
+              /402/i.test(errorString) ||
+              /payment required/i.test(errorString)
+            ) {
+              errorType = "quota_rate_limit";
+              log.error(
+                `[MODEL_API] ❌ QUOTA/RATE LIMIT ERROR - Request failed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
+                {
+                  message: errorMessage,
+                  name: err instanceof Error ? err.name : "Unknown",
+                  stack: err instanceof Error ? err.stack : undefined,
+                  errorType: "quota_rate_limit",
+                  suggestion: "Check API quota/credits. Wait before retrying or upgrade your plan.",
+                },
+              );
+            } else {
+              log.error(
+                `[MODEL_API] Request failed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
+                {
+                  message: errorMessage,
+                  name: err instanceof Error ? err.name : "Unknown",
+                  stack: err instanceof Error ? err.stack : undefined,
+                  errorType: "unknown",
+                },
+              );
             }
           });
         }

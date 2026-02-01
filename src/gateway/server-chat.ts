@@ -123,6 +123,7 @@ export type AgentEventHandlerOptions = {
   chatRunState: ChatRunState;
   resolveSessionKeyForRun: (runId: string) => string | undefined;
   clearAgentRunContext: (runId: string) => void;
+  logGateway?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
 };
 
 export function createAgentEventHandler({
@@ -132,7 +133,14 @@ export function createAgentEventHandler({
   chatRunState,
   resolveSessionKeyForRun,
   clearAgentRunContext,
+  logGateway,
 }: AgentEventHandlerOptions) {
+  // Use provided logger or fallback to console
+  const log = logGateway ?? {
+    info: (msg: string) => console.log(msg),
+    warn: (msg: string) => console.warn(msg),
+    error: (msg: string) => console.error(msg),
+  };
   const emitChatDelta = (sessionKey: string, clientRunId: string, seq: number, text: string) => {
     chatRunState.buffers.set(clientRunId, text);
     const now = Date.now();
@@ -242,11 +250,12 @@ export function createAgentEventHandler({
   };
 
   return (evt: AgentEventPayload) => {
-    const chatLink = chatRunState.registry.peek(evt.runId);
-    const sessionKey = chatLink?.sessionKey ?? resolveSessionKeyForRun(evt.runId);
-    const clientRunId = chatLink?.clientRunId ?? evt.runId;
-    const isAborted =
-      chatRunState.abortedRuns.has(clientRunId) || chatRunState.abortedRuns.has(evt.runId);
+    try {
+      const chatLink = chatRunState.registry.peek(evt.runId);
+      const sessionKey = chatLink?.sessionKey ?? resolveSessionKeyForRun(evt.runId);
+      const clientRunId = chatLink?.clientRunId ?? evt.runId;
+      const isAborted =
+        chatRunState.abortedRuns.has(clientRunId) || chatRunState.abortedRuns.has(evt.runId);
     // Include sessionKey so Control UI can filter tool streams per session.
     const agentPayload = sessionKey ? { ...evt, sessionKey } : evt;
     const last = agentRunSeq.get(evt.runId) ?? 0;
@@ -280,18 +289,18 @@ export function createAgentEventHandler({
       if (evt.stream === "assistant") {
         const hasText = typeof evt.data?.text === "string";
         const textLength = hasText && typeof evt.data.text === "string" ? evt.data.text.length : 0;
-        console.log(
+        log.info(
           `[EMIT_DELTA] Assistant stream event: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq} isAborted=${isAborted} hasText=${hasText} textLength=${textLength} dataType=${typeof evt.data}`,
         );
         if (evt.data && typeof evt.data === "object") {
           const dataAny = evt.data as Record<string, unknown>;
-          console.log(`[EMIT_DELTA] evt.data structure:`, {
+          log.info(`[EMIT_DELTA] evt.data structure: ${JSON.stringify({
             keys: Object.keys(dataAny),
             textType: typeof dataAny.text,
             textLength: typeof dataAny.text === "string" ? dataAny.text.length : "N/A",
             deltaType: typeof dataAny.delta,
             hasDelta: "delta" in dataAny,
-          });
+          })}`);
         }
       }
       
@@ -299,23 +308,23 @@ export function createAgentEventHandler({
         // Log delta emission to help debug empty content issues
         const textLength = evt.data.text.length;
         const textPreview = textLength > 100 ? evt.data.text.substring(0, 100) + "..." : evt.data.text;
-        console.log(
+        log.info(
           `[EMIT_DELTA] ✅ Sending delta: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq} textLength=${textLength} preview="${textPreview}"`,
         );
         emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text);
       } else if (!isAborted && evt.stream === "assistant") {
         // Log when assistant stream event doesn't trigger delta (for debugging)
-        console.warn(
+        log.warn(
           `[EMIT_DELTA] ⚠️ Assistant stream event but NO delta sent: runId=${evt.runId} clientRunId=${clientRunId} sessionKey=${sessionKey} seq=${evt.seq}`,
         );
-        console.warn(
+        log.warn(
           `[EMIT_DELTA] Condition check: isAborted=${isAborted} stream=${evt.stream} hasText=${typeof evt.data?.text === "string"}`,
         );
         if (evt.data && typeof evt.data === "object") {
           const dataAny = evt.data as Record<string, unknown>;
-          console.warn(`[EMIT_DELTA] evt.data keys:`, Object.keys(dataAny));
-          console.warn(`[EMIT_DELTA] evt.data.text:`, dataAny.text);
-          console.warn(`[EMIT_DELTA] evt.data.delta:`, dataAny.delta);
+          log.warn(`[EMIT_DELTA] evt.data keys: ${Object.keys(dataAny).join(",")}`);
+          log.warn(`[EMIT_DELTA] evt.data.text: ${JSON.stringify(dataAny.text)}`);
+          log.warn(`[EMIT_DELTA] evt.data.delta: ${JSON.stringify(dataAny.delta)}`);
         }
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
         if (chatLink) {
@@ -353,6 +362,25 @@ export function createAgentEventHandler({
 
     if (lifecyclePhase === "end" || lifecyclePhase === "error") {
       clearAgentRunContext(evt.runId);
+    }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      log.error(
+        `[EMIT_DELTA] ❌ Error in agent event handler: runId=${evt.runId} stream=${evt.stream} error="${errorMsg}"`,
+      );
+      if (errorStack) {
+        log.error(`[EMIT_DELTA] Error stack: ${errorStack}`);
+      }
+      log.error(
+        `[EMIT_DELTA] Event context: ${JSON.stringify({
+          runId: evt.runId,
+          stream: evt.stream,
+          seq: evt.seq,
+          dataKeys: evt.data && typeof evt.data === "object" ? Object.keys(evt.data) : [],
+        })}`,
+      );
+      // Don't re-throw to prevent breaking the event stream, but log the error
     }
   };
 }
