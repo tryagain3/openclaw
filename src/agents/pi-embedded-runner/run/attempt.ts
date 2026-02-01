@@ -533,7 +533,7 @@ export async function runEmbeddedAttempt(
         // Log first few messages for debugging
         if (messages.length > 0) {
           const preview = messages.slice(0, 3).map((msg, idx) => {
-            const msgAny = msg as Record<string, unknown>;
+            const msgAny = msg as unknown as Record<string, unknown>;
             const content = msgAny.content;
             let contentPreview = "unknown";
             if (typeof content === "string") {
@@ -576,7 +576,7 @@ export async function runEmbeddedAttempt(
           },
         };
         
-        const result = originalStreamFn(model as Model<Api>, context, wrappedOptions);
+        const result = originalStreamFn(model as Model<Api>, context as Parameters<StreamFn>[1], wrappedOptions);
         
         // Handle promise rejection to catch errors
         if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
