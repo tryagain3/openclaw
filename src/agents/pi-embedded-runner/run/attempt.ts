@@ -671,17 +671,19 @@ export async function runEmbeddedAttempt(
         log.info(`[MODEL_API] Request payload: ${JSON.stringify(requestPayload, null, 2)}`);
         
         let responseReceived = false;
+        let payloadCount = 0;
         const requestStartTime = Date.now();
         const opts = options as { onPayload?: (payload: unknown) => void } | undefined;
         
         const wrappedOptions = {
           ...opts,
           onPayload: (payload: unknown) => {
+            payloadCount++;
             if (!responseReceived) {
               responseReceived = true;
               const duration = Date.now() - requestStartTime;
               log.info(
-                `[MODEL_API] Response received (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id}`,
+                `[MODEL_API] Response received (first payload, ${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id}`,
               );
               // Log payload structure (but not full content to avoid spam)
               try {
@@ -691,6 +693,13 @@ export async function runEmbeddedAttempt(
               } catch {
                 log.info(`[MODEL_API] Response payload: [non-serializable]`);
               }
+            } else {
+              // Log subsequent streaming chunks (but limit frequency to avoid spam)
+              if (payloadCount % 10 === 0 || payloadCount <= 3) {
+                log.info(
+                  `[MODEL_API] Streaming chunk #${payloadCount}: provider=${modelInfo.provider} model=${modelInfo.id}`,
+                );
+              }
             }
             opts?.onPayload?.(payload);
           },
@@ -698,12 +707,17 @@ export async function runEmbeddedAttempt(
         
         const result = originalStreamFn(model as Model<Api>, context as Parameters<StreamFn>[1], wrappedOptions);
         
-        // Handle promise rejection to catch errors
+        // Handle promise rejection to catch errors and completion
         if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
-          (result as Promise<unknown>).catch((err: unknown) => {
+          (result as Promise<unknown>).then(() => {
+            const duration = Date.now() - requestStartTime;
+            log.info(
+              `[MODEL_API] Stream completed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id}`,
+            );
+          }).catch((err: unknown) => {
             const duration = Date.now() - requestStartTime;
             log.error(
-              `[MODEL_API] Request failed (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
+              `[MODEL_API] Request failed (${duration}ms, ${payloadCount} payloads): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
             );
             log.error(`[MODEL_API] Error:`, {
               message: err instanceof Error ? err.message : String(err),
