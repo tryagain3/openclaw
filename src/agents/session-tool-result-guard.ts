@@ -89,7 +89,7 @@ export function installSessionToolResultGuard(
 
     // #region agent log
     if (role === "assistant") {
-      const msg = message as Record<string, unknown>;
+      const msg = message as unknown as Record<string, unknown>;
       const hasEmptyContent = Array.isArray(msg.content) && msg.content.length === 0;
       fetch('http://127.0.0.1:7244/ingest/2688fe74-68c1-4ff8-98aa-6bd3a43e9c22',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'session-tool-result-guard.ts:87',message:'SessionManager.appendMessage assistant message',data:{role,hasContent:!!msg.content,contentType:typeof msg.content,contentIsArray:Array.isArray(msg.content),contentLength:Array.isArray(msg.content)?msg.content.length:'N/A',hasEmptyContent,allKeys:Object.keys(msg)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'WRITE'})}).catch(()=>{});
     }
