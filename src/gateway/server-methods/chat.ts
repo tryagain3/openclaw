@@ -208,8 +208,40 @@ export const chatHandlers: GatewayRequestHandlers = {
     const rawMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
     
+    // Check for empty content arrays in raw messages
+    const emptyContentMessages = rawMessages.filter((msg) => {
+      const m = msg as Record<string, unknown>;
+      return (
+        m.role === "assistant" &&
+        Array.isArray(m.content) &&
+        m.content.length === 0
+      );
+    });
+    
+    if (emptyContentMessages.length > 0) {
+      context.logGateway.warn(
+        `[CHAT.HISTORY] Found ${emptyContentMessages.length} assistant messages with empty content arrays`,
+      );
+      // Log sample of empty messages
+      const sample = emptyContentMessages.slice(0, 3).map((msg) => {
+        const m = msg as Record<string, unknown>;
+        return {
+          role: m.role,
+          timestamp: m.timestamp,
+          hasContent: Array.isArray(m.content),
+          contentLength: Array.isArray(m.content) ? m.content.length : 0,
+          stopReason: m.stopReason,
+          errorMessage: m.errorMessage,
+          allKeys: Object.keys(m),
+        };
+      });
+      context.logGateway.warn(
+        `[CHAT.HISTORY] Sample empty messages: ${JSON.stringify(sample, null, 2)}`,
+      );
+    }
+    
     context.logGateway.info(
-      `[CHAT.HISTORY] Raw messages: count=${rawMessages.length} hasSessionId=${!!sessionId} hasStorePath=${!!storePath}`,
+      `[CHAT.HISTORY] Raw messages: count=${rawMessages.length} hasSessionId=${!!sessionId} hasStorePath=${!!storePath} emptyContentCount=${emptyContentMessages.length}`,
     );
     
     const hardMax = 1000;
@@ -378,6 +410,12 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Log the incoming user message
+    context.logGateway.info(
+      `[CHAT.SEND] User message: sessionKey=${p.sessionKey} message="${rawMessage.substring(0, 200)}${rawMessage.length > 200 ? "..." : ""}" attachments=${normalizedAttachments.length}`,
+    );
+    
     let parsedMessage = p.message;
     let parsedImages: ChatImageContent[] = [];
     if (normalizedAttachments.length > 0) {
@@ -388,6 +426,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         });
         parsedMessage = parsed.message;
         parsedImages = parsed.images;
+        context.logGateway.info(
+          `[CHAT.SEND] Parsed message: text="${parsedMessage.substring(0, 200)}${parsedMessage.length > 200 ? "..." : ""}" images=${parsedImages.length}`,
+        );
       } catch (err) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(err)));
         return;

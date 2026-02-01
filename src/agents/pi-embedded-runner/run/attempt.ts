@@ -467,6 +467,44 @@ export async function runEmbeddedAttempt(
         throw new Error("Embedded agent session missing");
       }
       const activeSession = session;
+      
+      // Log agent run start with initial message history
+      log.info(
+        `[AGENT_RUN] Start: runId=${params.runId} sessionId=${activeSession.sessionId} sessionKey=${params.sessionKey ?? "none"} provider=${params.provider} model=${params.modelId}`,
+      );
+      log.info(
+        `[AGENT_RUN] Initial messages loaded: count=${activeSession.messages.length} systemPromptLength=${systemPrompt?.length ?? 0}`,
+      );
+      if (activeSession.messages.length > 0) {
+        const initialMessagesPreview = activeSession.messages.slice(-5).map((msg: AgentMessage, idx: number) => {
+          const msgAny = msg as unknown as Record<string, unknown>;
+          const content = msgAny.content;
+          let contentText = "unknown";
+          if (typeof content === "string") {
+            contentText = content.length > 100 ? content.substring(0, 100) + "..." : content;
+          } else if (Array.isArray(content)) {
+            const textParts: string[] = [];
+            for (const item of content) {
+              if (typeof item === "object" && item !== null) {
+                const itemAny = item as Record<string, unknown>;
+                if (itemAny.type === "text" && typeof itemAny.text === "string") {
+                  textParts.push(itemAny.text);
+                }
+              }
+            }
+            contentText = textParts.join(" ").length > 100
+              ? textParts.join(" ").substring(0, 100) + "..."
+              : textParts.join(" ");
+          }
+          return {
+            index: activeSession.messages.length - 5 + idx,
+            role: msgAny.role ?? "unknown",
+            content: contentText,
+          };
+        });
+        log.info(`[AGENT_RUN] Last 5 messages: ${JSON.stringify(initialMessagesPreview, null, 2)}`);
+      }
+      
       const cacheTrace = createCacheTrace({
         cfg: params.config,
         env: process.env,
@@ -524,31 +562,113 @@ export async function runEmbeddedAttempt(
         const images = ctx.images;
         
         log.info(
-          `[MODEL_API] Request: provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"} api=${modelInfo.api ?? "unknown"} sessionKey=${params.sessionKey} runId=${params.runId}`,
+          `[MODEL_API] streamFn called: provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"} api=${modelInfo.api ?? "unknown"} sessionKey=${params.sessionKey} runId=${params.runId}`,
         );
         log.info(
-          `[MODEL_API] Request context: messages=${messages.length} systemPromptLength=${system?.length ?? 0} hasImages=${images?.length ?? 0}`,
+          `[MODEL_API] Input context: messageCount=${messages.length} systemPromptLength=${system?.length ?? 0} hasImages=${images?.length ?? 0}`,
         );
         
-        // Log first few messages for debugging
+        // Verify: message count should be messageCountBefore + 1 (the new user message was added)
+        // This confirms the prompt was successfully added before streamFn was called
         if (messages.length > 0) {
-          const preview = messages.slice(0, 3).map((msg, idx) => {
-            const msgAny = msg as unknown as Record<string, unknown>;
-            const content = msgAny.content;
-            let contentPreview = "unknown";
-            if (typeof content === "string") {
-              contentPreview = content.substring(0, 100);
-            } else if (Array.isArray(content)) {
-              contentPreview = `[${content.length} items]`;
-            }
-            return {
-              index: idx,
-              role: msgAny.role ?? "unknown",
-              contentPreview,
-            };
-          });
-          log.info(`[MODEL_API] Request messages preview:`, { preview });
+          const lastMessage = messages[messages.length - 1] as unknown as Record<string, unknown>;
+          const lastRole = lastMessage.role;
+          log.info(
+            `[MODEL_API] Last message in context: role=${lastRole} index=${messages.length - 1}`,
+          );
         }
+        // Log the full request payload being sent to the API at runtime
+        const requestPayload: Record<string, unknown> = {
+          provider: modelInfo.provider,
+          model: modelInfo.id,
+          baseUrl: modelInfo.baseUrl ?? "default",
+          api: modelInfo.api ?? "unknown",
+          messageCount: messages.length,
+          systemPromptLength: system?.length ?? 0,
+          hasImages: images?.length ?? 0,
+        };
+        
+        // Extract and log all messages with their actual content
+        // Find the last user message index to highlight it
+        let lastUserMessageIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msgAny = messages[i] as unknown as Record<string, unknown>;
+          if (msgAny.role === "user") {
+            lastUserMessageIndex = i;
+            break;
+          }
+        }
+        
+        const loggedMessages = messages.map((msg, idx) => {
+          const msgAny = msg as unknown as Record<string, unknown>;
+          const content = msgAny.content;
+          let contentText = "unknown";
+          let contentPreview = "";
+          
+          if (typeof content === "string") {
+            contentText = content;
+            contentPreview = content.length > 300 ? content.substring(0, 300) + "..." : content;
+          } else if (Array.isArray(content)) {
+            // Extract text from content array
+            const textParts: string[] = [];
+            const contentItems: unknown[] = [];
+            for (const item of content) {
+              if (typeof item === "object" && item !== null) {
+                const itemAny = item as Record<string, unknown>;
+                if (itemAny.type === "text" && typeof itemAny.text === "string") {
+                  textParts.push(itemAny.text);
+                  contentItems.push({ type: "text", text: itemAny.text.length > 200 ? itemAny.text.substring(0, 200) + "..." : itemAny.text });
+                } else if (itemAny.type === "image" || itemAny.type === "image_url") {
+                  contentItems.push({ type: itemAny.type, hasData: !!itemAny.data || !!itemAny.image_url });
+                } else {
+                  contentItems.push({ type: itemAny.type ?? "unknown", keys: Object.keys(itemAny) });
+                }
+              }
+            }
+            contentText = textParts.join(" ");
+            contentPreview = contentItems.length > 0 ? JSON.stringify(contentItems) : `[${content.length} items, no text]`;
+          }
+          
+          const isLastUserMessage = idx === lastUserMessageIndex && msgAny.role === "user";
+          
+          return {
+            index: idx,
+            role: msgAny.role ?? "unknown",
+            content: contentText.length > 500 ? contentText.substring(0, 500) + "..." : contentText,
+            contentPreview: contentPreview.length > 500 ? contentPreview.substring(0, 500) + "..." : contentPreview,
+            isLastUserMessage: isLastUserMessage,
+          };
+        });
+        
+        // Log the last user message separately for clarity
+        if (lastUserMessageIndex >= 0) {
+          const lastUserMsg = loggedMessages[lastUserMessageIndex];
+          log.info(
+            `[MODEL_API] Last user message (index ${lastUserMessageIndex}): "${lastUserMsg.content}"`,
+          );
+        }
+        
+        requestPayload.messages = loggedMessages;
+        
+        // Log system prompt preview
+        if (system) {
+          requestPayload.systemPrompt = system.length > 500 ? system.substring(0, 500) + "..." : system;
+        }
+        
+        // Log options/parameters
+        if (options && typeof options === "object") {
+          const opts = options as Record<string, unknown>;
+          requestPayload.options = {
+            temperature: opts.temperature,
+            maxTokens: opts.maxTokens,
+            topP: opts.topP,
+            topK: opts.topK,
+            hasOnPayload: typeof opts.onPayload === "function",
+            hasOnError: typeof opts.onError === "function",
+          };
+        }
+        
+        log.info(`[MODEL_API] Request payload: ${JSON.stringify(requestPayload, null, 2)}`);
         
         let responseReceived = false;
         const requestStartTime = Date.now();
@@ -795,6 +915,12 @@ export async function runEmbeddedAttempt(
         }
 
         log.debug(`embedded run prompt start: runId=${params.runId} sessionId=${params.sessionId}`);
+        
+        // Log the prompt being added and current message state before streamFn is called
+        log.info(
+          `[AGENT_RUN] Adding prompt: runId=${params.runId} prompt="${effectivePrompt.substring(0, 200)}${effectivePrompt.length > 200 ? "..." : ""}" messageCountBefore=${activeSession.messages.length}`,
+        );
+        
         cacheTrace?.recordStage("prompt:before", {
           prompt: effectivePrompt,
           messages: activeSession.messages,
