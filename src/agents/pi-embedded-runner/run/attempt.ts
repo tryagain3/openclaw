@@ -532,15 +532,21 @@ export async function runEmbeddedAttempt(
         
         // Log first few messages for debugging
         if (messages.length > 0) {
-          const preview = messages.slice(0, 3).map((msg, idx) => ({
-            index: idx,
-            role: msg.role,
-            contentPreview: typeof msg.content === "string" 
-              ? msg.content.substring(0, 100) 
-              : Array.isArray(msg.content) 
-                ? `[${msg.content.length} items]`
-                : "unknown",
-          }));
+          const preview = messages.slice(0, 3).map((msg, idx) => {
+            const msgAny = msg as Record<string, unknown>;
+            const content = msgAny.content;
+            let contentPreview = "unknown";
+            if (typeof content === "string") {
+              contentPreview = content.substring(0, 100);
+            } else if (Array.isArray(content)) {
+              contentPreview = `[${content.length} items]`;
+            }
+            return {
+              index: idx,
+              role: msgAny.role ?? "unknown",
+              contentPreview,
+            };
+          });
           log.info(`[MODEL_API] Request messages preview:`, { preview });
         }
         
@@ -570,7 +576,7 @@ export async function runEmbeddedAttempt(
           },
         };
         
-        const result = originalStreamFn(model, context, wrappedOptions);
+        const result = originalStreamFn(model as Model<Api>, context, wrappedOptions);
         
         // Handle promise rejection to catch errors
         if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
