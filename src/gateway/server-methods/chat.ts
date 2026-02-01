@@ -200,8 +200,18 @@ export const chatHandlers: GatewayRequestHandlers = {
     };
     const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
     const sessionId = entry?.sessionId;
+    
+    context.logGateway.info(
+      `[CHAT.HISTORY] Loading: sessionKey=${sessionKey} sessionId=${sessionId ?? "none"} storePath=${storePath ?? "none"} sessionFile=${entry?.sessionFile ?? "none"}`,
+    );
+    
     const rawMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
+    
+    context.logGateway.info(
+      `[CHAT.HISTORY] Raw messages: count=${rawMessages.length} hasSessionId=${!!sessionId} hasStorePath=${!!storePath}`,
+    );
+    
     const hardMax = 1000;
     const defaultLimit = 200;
     const requested = typeof limit === "number" ? limit : defaultLimit;
@@ -209,6 +219,10 @@ export const chatHandlers: GatewayRequestHandlers = {
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
     const capped = capArrayByJsonBytes(sanitized, getMaxChatHistoryMessagesBytes()).items;
+    
+    context.logGateway.info(
+      `[CHAT.HISTORY] Processed: sliced=${sliced.length} sanitized=${sanitized.length} capped=${capped.length}`,
+    );
     
     // Resolve model info once for both thinkingLevel and response
     const { provider, model } = resolveSessionModelRef(cfg, entry);

@@ -1,32 +1,33 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ImageContent } from "@mariozechner/pi-ai";
+import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
+import type { Api, AssistantMessage, ImageContent, Model } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
 
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
+import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
+import { getMachineDisplayName } from "../../../infra/machine-name.js";
+import { isSubagentSessionKey } from "../../../routing/session-key.js";
+import { resolveSignalReactionLevel } from "../../../signal/reaction-level.js";
+import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
+import { resolveTelegramReactionLevel } from "../../../telegram/reaction-level.js";
+import { resolveUserPath } from "../../../utils.js";
+import { normalizeMessageChannel } from "../../../utils/message-channel.js";
+import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
+import { resolveOpenClawAgentDir } from "../../agent-paths.js";
+import { resolveSessionAgentIds } from "../../agent-scope.js";
+import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
+import { makeBootstrapWarn, resolveBootstrapContextForRun } from "../../bootstrap-files.js";
+import { createCacheTrace } from "../../cache-trace.js";
 import {
   listChannelSupportedActions,
   resolveChannelMessageToolHints,
 } from "../../channel-tools.js";
-import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
-import { getMachineDisplayName } from "../../../infra/machine-name.js";
-import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
-import { resolveTelegramReactionLevel } from "../../../telegram/reaction-level.js";
-import { resolveSignalReactionLevel } from "../../../signal/reaction-level.js";
-import { normalizeMessageChannel } from "../../../utils/message-channel.js";
-import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
-import { isSubagentSessionKey } from "../../../routing/session-key.js";
-import { resolveUserPath } from "../../../utils.js";
-import { createCacheTrace } from "../../cache-trace.js";
-import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
-import { resolveOpenClawAgentDir } from "../../agent-paths.js";
-import { resolveSessionAgentIds } from "../../agent-scope.js";
-import { makeBootstrapWarn, resolveBootstrapContextForRun } from "../../bootstrap-files.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
+import { resolveDefaultModelForAgent } from "../../model-selection.js";
 import {
   isCloudCodeAssistFormatError,
   resolveBootstrapMaxChars,
@@ -41,7 +42,6 @@ import {
 import { createOpenClawCodingTools } from "../../pi-tools.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
-import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { acquireSessionWriteLock } from "../../session-write-lock.js";
 import {
   applySkillEnvOverrides,
@@ -49,14 +49,21 @@ import {
   loadWorkspaceSkillEntries,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
-import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
-import { resolveDefaultModelForAgent } from "../../model-selection.js";
+import { resolveTranscriptPolicy } from "../../transcript-policy.js";
+import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 
+import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
+import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
+import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
+import { isTimeoutError } from "../../failover-error.js";
+import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
+import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
+import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { isAbortError } from "../abort.js";
+import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import { buildEmbeddedExtensionPaths } from "../extensions.js";
 import { applyExtraParamsToAgent } from "../extra-params.js";
-import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import {
   logToolSchemasForGoogle,
   sanitizeSessionHistory,
@@ -75,16 +82,9 @@ import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manage
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
 import { buildEmbeddedSystemPrompt, createSystemPromptOverride } from "../system-prompt.js";
 import { splitSdkTools } from "../tool-split.js";
-import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
-import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
-import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
-import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
-import { isTimeoutError } from "../../failover-error.js";
-import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
-import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
-import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 import { detectAndLoadPromptImages } from "./images.js";
+import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
 export function injectHistoryImagesIntoMessages(
   messages: AgentMessage[],
@@ -513,6 +513,84 @@ export async function runEmbeddedAttempt(
           activeSession.agent.streamFn,
         );
       }
+
+      // Wrap streamFn to log model API requests and responses
+      const originalStreamFn: StreamFn = activeSession.agent.streamFn;
+      activeSession.agent.streamFn = ((model: unknown, context: unknown, options?: unknown) => {
+        const modelInfo = model as Model<Api>;
+        const ctx = context as { messages?: AgentMessage[]; system?: string; images?: ImageContent[] };
+        const messages = ctx.messages ?? [];
+        const system = ctx.system;
+        const images = ctx.images;
+        
+        log.info(
+          `[MODEL_API] Request: provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"} api=${modelInfo.api ?? "unknown"} sessionKey=${params.sessionKey} runId=${params.runId}`,
+        );
+        log.info(
+          `[MODEL_API] Request context: messages=${messages.length} systemPromptLength=${system?.length ?? 0} hasImages=${images?.length ?? 0}`,
+        );
+        
+        // Log first few messages for debugging
+        if (messages.length > 0) {
+          const preview = messages.slice(0, 3).map((msg, idx) => ({
+            index: idx,
+            role: msg.role,
+            contentPreview: typeof msg.content === "string" 
+              ? msg.content.substring(0, 100) 
+              : Array.isArray(msg.content) 
+                ? `[${msg.content.length} items]`
+                : "unknown",
+          }));
+          log.info(`[MODEL_API] Request messages preview:`, { preview });
+        }
+        
+        let responseReceived = false;
+        const requestStartTime = Date.now();
+        const opts = options as { onPayload?: (payload: unknown) => void } | undefined;
+        
+        const wrappedOptions = {
+          ...opts,
+          onPayload: (payload: unknown) => {
+            if (!responseReceived) {
+              responseReceived = true;
+              const duration = Date.now() - requestStartTime;
+              log.info(
+                `[MODEL_API] Response received (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id}`,
+              );
+              // Log payload structure (but not full content to avoid spam)
+              try {
+                const payloadStr = JSON.stringify(payload);
+                const payloadPreview = payloadStr.length > 500 ? payloadStr.substring(0, 500) + "..." : payloadStr;
+                log.info(`[MODEL_API] Response payload preview:`, { preview: payloadPreview });
+              } catch {
+                log.info(`[MODEL_API] Response payload: [non-serializable]`);
+              }
+            }
+            opts?.onPayload?.(payload);
+          },
+        };
+        
+        const result = originalStreamFn(model, context, wrappedOptions);
+        
+        // Handle promise rejection to catch errors
+        if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
+          (result as Promise<unknown>).catch((err: unknown) => {
+            const duration = Date.now() - requestStartTime;
+            log.error(
+              `[MODEL_API] Request failed (${duration}ms): provider=${modelInfo.provider} model=${modelInfo.id} baseUrl=${modelInfo.baseUrl ?? "default"}`,
+            );
+            log.error(`[MODEL_API] Error:`, {
+              message: err instanceof Error ? err.message : String(err),
+              name: err instanceof Error ? err.name : "Unknown",
+            });
+            if (err instanceof Error && err.stack) {
+              log.error(`[MODEL_API] Error stack:`, { stack: err.stack });
+            }
+          });
+        }
+        
+        return result;
+      }) as StreamFn;
 
       try {
         const prior = await sanitizeSessionHistory({
