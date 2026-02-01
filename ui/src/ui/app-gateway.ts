@@ -109,6 +109,12 @@ function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnaps
   }
 }
 
+function maskToken(token: string | undefined | null): string {
+  if (!token || token.length === 0) return "(empty)";
+  if (token.length <= 8) return "***";
+  return `${token.substring(0, 4)}...${token.substring(token.length - 4)}`;
+}
+
 export function connectGateway(host: GatewayHost) {
   host.lastError = null;
   host.hello = null;
@@ -116,10 +122,24 @@ export function connectGateway(host: GatewayHost) {
   host.execApprovalQueue = [];
   host.execApprovalError = null;
 
+  const gatewayUrl = host.settings.gatewayUrl;
+  const token = host.settings.token.trim() ? host.settings.token : undefined;
+  const hasPassword = !!host.password.trim();
+  
+  console.group(`%c[GATEWAY] Connecting`, "color: #9C27B0; font-weight: bold");
+  console.log("Connection details:", {
+    gatewayUrl,
+    token: maskToken(token),
+    hasToken: !!token,
+    hasPassword,
+    sessionKey: host.sessionKey,
+  });
+  console.groupEnd();
+
   host.client?.stop();
   host.client = new GatewayBrowserClient({
-    url: host.settings.gatewayUrl,
-    token: host.settings.token.trim() ? host.settings.token : undefined,
+    url: gatewayUrl,
+    token,
     password: host.password.trim() ? host.password : undefined,
     clientName: "openclaw-control-ui",
     mode: "webchat",

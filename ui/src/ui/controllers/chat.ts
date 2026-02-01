@@ -27,6 +27,12 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+function maskToken(token: string | undefined | null): string {
+  if (!token || token.length === 0) return "(empty)";
+  if (token.length <= 8) return "***";
+  return `${token.substring(0, 4)}...${token.substring(token.length - 4)}`;
+}
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
@@ -40,16 +46,48 @@ export async function loadChatHistory(state: ChatState) {
       limit: 200,
     };
     
+    // Extract connection info from client (if available)
+    const clientInfo = state.client as unknown as {
+      opts?: { url?: string; token?: string; password?: string };
+      ws?: WebSocket;
+    };
+    const gatewayUrl = clientInfo.opts?.url ?? "unknown";
+    const token = clientInfo.opts?.token;
+    const hasPassword = !!clientInfo.opts?.password;
+    const wsState = clientInfo.ws?.readyState;
+    const wsStateText = wsState !== undefined 
+      ? ["CONNECTING", "OPEN", "CLOSING", "CLOSED"][wsState] ?? `unknown(${wsState})`
+      : "unknown";
+    
     console.group(`%c[API] chat.history`, "color: #2196F3; font-weight: bold");
+    console.log("🔌 Connection:", {
+      gatewayUrl,
+      token: maskToken(token),
+      hasToken: !!token,
+      hasPassword,
+      wsState: wsStateText,
+      connected: state.connected,
+    });
     console.log("📤 Request:", requestParams);
     
     const requestStartTime = Date.now();
-    let res: { messages?: unknown[]; thinkingLevel?: string | null };
+    let res: {
+      messages?: unknown[];
+      thinkingLevel?: string | null;
+      modelProvider?: string;
+      modelId?: string;
+      modelBaseUrl?: string;
+      modelApi?: string;
+    };
     
     try {
       res = (await state.client.request("chat.history", requestParams)) as {
         messages?: unknown[];
         thinkingLevel?: string | null;
+        modelProvider?: string;
+        modelId?: string;
+        modelBaseUrl?: string;
+        modelApi?: string;
       };
       const requestDuration = Date.now() - requestStartTime;
       console.log(`✅ Request succeeded (${requestDuration}ms)`);
@@ -70,14 +108,32 @@ export async function loadChatHistory(state: ChatState) {
     const hasMessages = "messages" in res;
     const messagesIsArray = Array.isArray(res.messages);
     
+    const modelProvider = res.modelProvider;
+    const modelId = res.modelId;
+    const modelBaseUrl = res.modelBaseUrl;
+    const modelApi = res.modelApi;
+    
     console.log("📥 Response:", {
       duration: `${requestDuration}ms`,
       messageCount,
       hasMessages,
       messagesIsArray,
       thinkingLevel: res.thinkingLevel,
+      modelProvider: typeof modelProvider === "string" ? modelProvider : undefined,
+      modelId: typeof modelId === "string" ? modelId : undefined,
+      modelBaseUrl: typeof modelBaseUrl === "string" ? modelBaseUrl : undefined,
+      modelApi: typeof modelApi === "string" ? modelApi : undefined,
       responseKeys: res !== null && typeof res === "object" ? Object.keys(res) : [],
     });
+    
+    if (modelProvider && modelId) {
+      console.log("🤖 Model Provider:", {
+        provider: modelProvider,
+        model: modelId,
+        baseUrl: modelBaseUrl ?? "default",
+        api: modelApi ?? "unknown",
+      });
+    }
     
     // Validate response
     if (!res || typeof res !== "object") {
@@ -98,13 +154,30 @@ export async function loadChatHistory(state: ChatState) {
       console.warn("⚠️ Response has empty messages array");
       console.log("Full response:", JSON.parse(JSON.stringify(res)));
     } else if (Array.isArray(res.messages)) {
-      // Check for empty content arrays
-      const emptyContentCount = res.messages.filter((msg: unknown) => {
+      // Check for empty content arrays and log details
+      const messagesWithDetails = res.messages.map((msg: unknown, idx: number) => {
         const m = msg as Record<string, unknown>;
-        return Array.isArray(m.content) && m.content.length === 0;
-      }).length;
+        const hasEmptyContent = Array.isArray(m.content) && m.content.length === 0;
+        return {
+          index: idx,
+          role: m.role,
+          hasContent: !!m.content,
+          contentType: typeof m.content,
+          contentIsArray: Array.isArray(m.content),
+          contentLength: Array.isArray(m.content) ? m.content.length : "N/A",
+          hasEmptyContent,
+          allKeys: Object.keys(m),
+        };
+      });
+      
+      const emptyContentCount = messagesWithDetails.filter((m) => m.hasEmptyContent).length;
       if (emptyContentCount > 0) {
         console.warn(`⚠️ ${emptyContentCount}/${messageCount} messages have empty content arrays`);
+        console.log("Message details:", messagesWithDetails);
+        console.log("Messages with empty content:", res.messages.filter((msg: unknown) => {
+          const m = msg as Record<string, unknown>;
+          return Array.isArray(m.content) && m.content.length === 0;
+        }).map((msg: unknown) => JSON.parse(JSON.stringify(msg))));
       }
     }
     

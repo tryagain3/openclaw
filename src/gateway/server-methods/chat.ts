@@ -6,6 +6,7 @@ import { CURRENT_SESSION_VERSION } from "@mariozechner/pi-coding-agent";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveEffectiveMessagesConfig, resolveIdentityName } from "../../agents/identity.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
+import { resolveModel } from "../../agents/pi-embedded-runner/model.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
@@ -23,6 +24,7 @@ import {
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
 import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
+import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import {
   ErrorCodes,
   errorShape,
@@ -39,7 +41,6 @@ import {
   readSessionMessages,
   resolveSessionModelRef,
 } from "../session-utils.js";
-import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { formatForLog } from "../ws-log.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 
@@ -208,13 +209,20 @@ export const chatHandlers: GatewayRequestHandlers = {
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
     const capped = capArrayByJsonBytes(sanitized, getMaxChatHistoryMessagesBytes()).items;
+    
+    // Resolve model info once for both thinkingLevel and response
+    const { provider, model } = resolveSessionModelRef(cfg, entry);
+    const agentId = resolveSessionAgentId({ sessionKey, config: cfg });
+    const modelResolved = resolveModel(provider, model, agentId, cfg);
+    const modelBaseUrl = modelResolved.model?.baseUrl;
+    const modelApi = modelResolved.model?.api;
+    
     let thinkingLevel = entry?.thinkingLevel;
     if (!thinkingLevel) {
       const configured = cfg.agents?.defaults?.thinkingDefault;
       if (configured) {
         thinkingLevel = configured;
       } else {
-        const { provider, model } = resolveSessionModelRef(cfg, entry);
         const catalog = await context.loadGatewayModelCatalog();
         thinkingLevel = resolveThinkingDefault({
           cfg,
@@ -224,11 +232,20 @@ export const chatHandlers: GatewayRequestHandlers = {
         });
       }
     }
+    
+    context.logGateway.info(
+      `[MODEL] chat.history: provider=${provider} model=${model} baseUrl=${modelBaseUrl ?? "default"} api=${modelApi ?? "unknown"} sessionKey=${sessionKey} messageCount=${capped.length}`,
+    );
+    
     respond(true, {
       sessionKey,
       sessionId,
       messages: capped,
       thinkingLevel,
+      modelProvider: provider,
+      modelId: model,
+      modelBaseUrl: modelBaseUrl ?? undefined,
+      modelApi: modelApi ?? undefined,
     });
   },
   "chat.abort": ({ params, respond, context }) => {
@@ -465,6 +482,17 @@ export const chatHandlers: GatewayRequestHandlers = {
         sessionKey: p.sessionKey,
         config: cfg,
       });
+      
+      // Resolve model to get baseUrl for logging
+      const { provider, model } = resolveSessionModelRef(cfg, entry);
+      const modelResolved = resolveModel(provider, model, agentId, cfg);
+      const modelBaseUrl = modelResolved.model?.baseUrl;
+      const modelApi = modelResolved.model?.api;
+      
+      context.logGateway.info(
+        `[MODEL] chat.send: provider=${provider} model=${model} baseUrl=${modelBaseUrl ?? "default"} api=${modelApi ?? "unknown"} sessionKey=${p.sessionKey}`,
+      );
+      
       let prefixContext: ResponsePrefixContext = {
         identityName: resolveIdentityName(cfg, agentId),
       };
@@ -501,6 +529,14 @@ export const chatHandlers: GatewayRequestHandlers = {
             prefixContext.model = extractShortModelName(ctx.model);
             prefixContext.modelFull = `${ctx.provider}/${ctx.model}`;
             prefixContext.thinkingLevel = ctx.thinkLevel ?? "off";
+            
+            // Log actual model selected (may differ from initial resolve due to fallbacks)
+            const selectedModelResolved = resolveModel(ctx.provider, ctx.model, agentId, cfg);
+            const selectedBaseUrl = selectedModelResolved.model?.baseUrl;
+            const selectedApi = selectedModelResolved.model?.api;
+            context.logGateway.info(
+              `[MODEL] Selected: provider=${ctx.provider} model=${ctx.model} baseUrl=${selectedBaseUrl ?? "default"} api=${selectedApi ?? "unknown"}`,
+            );
           },
         },
       })

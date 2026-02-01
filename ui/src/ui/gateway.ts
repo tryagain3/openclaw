@@ -1,13 +1,13 @@
-import { generateUUID } from "./uuid";
+import { buildDeviceAuthPayload } from "../../../src/gateway/device-auth.js";
 import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
   type GatewayClientMode,
   type GatewayClientName,
 } from "../../../src/gateway/protocol/client-info.js";
-import { buildDeviceAuthPayload } from "../../../src/gateway/device-auth.js";
-import { loadOrCreateDeviceIdentity, signDevicePayload } from "./device-identity";
 import { clearDeviceAuthToken, loadDeviceAuthToken, storeDeviceAuthToken } from "./device-auth";
+import { loadOrCreateDeviceIdentity, signDevicePayload } from "./device-identity";
+import { generateUUID } from "./uuid";
 
 export type GatewayEventFrame = {
   type: "event";
@@ -267,8 +267,16 @@ export class GatewayBrowserClient {
       const pending = this.pending.get(res.id);
       if (!pending) return;
       this.pending.delete(res.id);
-      if (res.ok) pending.resolve(res.payload);
-      else pending.reject(new Error(res.error?.message ?? "request failed"));
+      if (res.ok) {
+        pending.resolve(res.payload);
+      } else {
+        console.error(`[WS] Request failed:`, {
+          id: res.id,
+          error: res.error,
+          wsUrl: this.opts.url,
+        });
+        pending.reject(new Error(res.error?.message ?? "request failed"));
+      }
       return;
     }
   }
@@ -279,6 +287,18 @@ export class GatewayBrowserClient {
     }
     const id = generateUUID();
     const frame = { type: "req", id, method, params };
+    
+    // Log API requests (only for chat.history to avoid spam)
+    if (method === "chat.history") {
+      console.log(`[WS] Sending request:`, {
+        method,
+        id,
+        params,
+        wsUrl: this.opts.url,
+        wsReadyState: this.ws.readyState,
+      });
+    }
+    
     const p = new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: (v) => resolve(v as T), reject });
     });
