@@ -11,7 +11,7 @@ if [ -f "$OPENCLAW_CONFIG" ]; then
   echo "Found openclaw.json at $OPENCLAW_CONFIG"
   if command -v jq &> /dev/null; then
     echo "Using jq to update configuration..."
-    if sudo jq '.gateway = (.gateway // {}) | .gateway.controlUi = {"enabled": true, "allowInsecureAuth": true}' "$OPENCLAW_CONFIG" > "$OPENCLAW_CONFIG.tmp" && sudo mv "$OPENCLAW_CONFIG.tmp" "$OPENCLAW_CONFIG"; then
+    if sudo jq '.gateway.controlUi = {"enabled": true, "allowInsecureAuth": true}' "$OPENCLAW_CONFIG" > "$OPENCLAW_CONFIG.tmp" && sudo mv "$OPENCLAW_CONFIG.tmp" "$OPENCLAW_CONFIG"; then
       echo "✓ Successfully updated openclaw.json with controlUi configuration"
     else
       echo "✗ Failed to update openclaw.json"
