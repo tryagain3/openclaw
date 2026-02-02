@@ -214,7 +214,8 @@ docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli onboard \
   --gemini-api-key "$OPENCLAW_GEMINI_API_KEY" \
   --skip-channels \
   --skip-skills \
-  --no-install-daemon
+  --no-install-daemon && \
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set google/gemini-2.0-flash
 
 echo ""
 echo "==> Provider setup (optional)"
