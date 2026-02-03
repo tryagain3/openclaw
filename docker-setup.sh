@@ -217,11 +217,44 @@ docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli onboard \
   --no-install-daemon
 
 echo ""
-echo "==> Configuring model to gemini-2.0-flash (clearing fallbacks to prevent quota issues)"
-docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models fallbacks clear
-docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models image-fallbacks clear
-docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set google/gemini-2.0-flash
-docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set-image google/gemini-2.0-flash
+echo "==> Configuring model to gemini-2.0-flash"
+OPENCLAW_CONFIG="$OPENCLAW_CONFIG_DIR/openclaw.json"
+if [ -f "$OPENCLAW_CONFIG" ]; then
+  if command -v python3 &> /dev/null; then
+    if python3 -c "
+import json
+with open('$OPENCLAW_CONFIG', 'r') as f:
+    c = json.load(f)
+# Set primary model (this also clears any existing fallbacks)
+a = c.setdefault('agents', {})
+d = a.setdefault('defaults', {})
+d['model'] = {'primary': 'google/gemini-2.0-flash'}
+# Set imageModel
+d['imageModel'] = {'primary': 'google/gemini-2.0-flash'}
+# Ensure model is in allowlist
+models = d.setdefault('models', {})
+models['google/gemini-2.0-flash'] = models.get('google/gemini-2.0-flash', {})
+with open('$OPENCLAW_CONFIG', 'w') as f:
+    json.dump(c, f, indent=2)
+print('✓ Model set to google/gemini-2.0-flash')
+"; then
+      echo "✓ Successfully configured model to google/gemini-2.0-flash"
+    else
+      echo "✗ Failed to update model configuration"
+      exit 1
+    fi
+  else
+    echo "✗ Error: python3 not found. Cannot update model configuration"
+    exit 1
+  fi
+else
+  echo "⚠️  Warning: openclaw.json not found at $OPENCLAW_CONFIG"
+  echo "  Attempting to use CLI commands as fallback..."
+  docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set google/gemini-2.0-flash || {
+    echo "✗ Error: Failed to set model"
+    exit 1
+  }
+fi
 
 echo ""
 echo "==> Verifying model configuration:"
