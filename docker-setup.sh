@@ -214,8 +214,18 @@ docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli onboard \
   --gemini-api-key "$OPENCLAW_GEMINI_API_KEY" \
   --skip-channels \
   --skip-skills \
-  --no-install-daemon && \
+  --no-install-daemon
+
+echo ""
+echo "==> Configuring model to gemini-2.0-flash (clearing fallbacks to prevent quota issues)"
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models fallbacks clear
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models image-fallbacks clear
 docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set google/gemini-2.0-flash
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models set-image google/gemini-2.0-flash
+
+echo ""
+echo "==> Verifying model configuration:"
+docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli models status --plain
 
 echo ""
 echo "==> Provider setup (optional)"
