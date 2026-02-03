@@ -16,8 +16,8 @@ sudo chmod 777 /volume1/docker/openclaw/.openclaw/workspace
 export OPENCLAW_GEMINI_API_KEY="AIzaSyBIm02Uf2KuuiVEbtbMu7uR2kpLvhlT7ok"
 ./docker-setup.sh
 
-# Add controlUi configuration to openclaw.json (ensure controlUi comes before tailscale)
-echo "Updating openclaw.json with controlUi configuration..."
+# Add controlUi configuration and set model to gemini-2.0-flash
+echo "Updating openclaw.json with controlUi configuration and model..."
 OPENCLAW_CONFIG="/volume1/docker/openclaw/.openclaw/openclaw.json"
 if [ -f "$OPENCLAW_CONFIG" ]; then
   echo "Found openclaw.json at $OPENCLAW_CONFIG"
@@ -27,16 +27,25 @@ if [ -f "$OPENCLAW_CONFIG" ]; then
 import json
 with open('$OPENCLAW_CONFIG') as f:
     c = json.load(f)
+# Update gateway config
 g = c.setdefault('gateway', {})
 g['controlUi'] = {'enabled': True, 'allowInsecureAuth': True}
 # Reorder: known keys first, then others
 ordered = {k: g[k] for k in ['mode', 'auth', 'port', 'bind', 'controlUi', 'tailscale'] if k in g}
 ordered.update({k: v for k, v in g.items() if k not in ordered})
 c['gateway'] = ordered
+# Update agents config to use gemini-2.0-flash
+a = c.setdefault('agents', {})
+d = a.setdefault('defaults', {})
+d['model'] = {'primary': 'google/gemini-2.0-flash'}
+d['imageModel'] = {'primary': 'google/gemini-2.0-flash'}
+# Ensure model is in allowlist
+models = d.setdefault('models', {})
+models['google/gemini-2.0-flash'] = models.get('google/gemini-2.0-flash', {})
 with open('$OPENCLAW_CONFIG', 'w') as f:
     json.dump(c, f, indent=2)
 "; then
-      echo "✓ Successfully updated openclaw.json with controlUi configuration"
+      echo "✓ Successfully updated openclaw.json with controlUi configuration and gemini-2.0-flash model"
     else
       echo "✗ Failed to update openclaw.json"
       exit 1
